@@ -85,3 +85,10 @@ class EventData(BaseModel):
     event_name: str
     properties: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
+
+
+class SyncEventRequest(BaseModel):
+    """Request model for syncing events to CRM"""
+    event_name: str
+    properties: Optional[Dict[str, Any]] = None
+    timestamp: Optional[datetime] = None

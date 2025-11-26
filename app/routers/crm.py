@@ -1,6 +1,6 @@
 """CRM Integration API - Generic CRM Integration Endpoints"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from asyncpg import Connection
 from datetime import datetime, timezone
 from uuid import UUID
@@ -10,7 +10,7 @@ import json
 
 from ..deps import get_merchant_id
 from ..db import get_conn
-from ..services.crm import (
+from ..services import (
     crm_manager,
     CRMAuthError,
     CRMAPIError,
@@ -546,13 +546,27 @@ async def sync_contact(
             credentials = integration["credentials"]
             crm_settings = integration["settings"]
 
+            # Parse credentials if it's a string
+            if isinstance(credentials, str):
+                credentials = json.loads(credentials)
+
+            # Parse settings if it's a string
+            if isinstance(crm_settings, str):
+                crm_settings = json.loads(crm_settings)
+
+            # Prepare contact data for CRM
+            contact_dict = contact_data.dict()
+
             # Apply field mapping if configured
-            mapped_data = _apply_field_mapping(contact_data.dict(), crm_settings.get("field_mapping", {}))
+            mapped_data = _apply_field_mapping(contact_dict, crm_settings.get("field_mapping", {}))
+
+            # Transform data to match CRM-specific format
+            transformed_data = _transform_contact_data(mapped_data, crm_type)
 
             # Create sync log (pending)
             log_id = await _create_sync_log(
                 conn, integration_id, merchant_id, crm_type,
-                "create_contact", "contact", None, mapped_data
+                "create_contact", "contact", None, transformed_data
             )
 
             try:
@@ -560,7 +574,7 @@ async def sync_contact(
                 result = await crm_manager.create_or_update_contact(
                     CRMType(crm_type),
                     credentials,
-                    mapped_data
+                    transformed_data
                 )
 
                 # Update sync log (success)
@@ -593,8 +607,8 @@ async def sync_contact(
 
 @router.post("/sync/event")
 async def sync_event(
-    event_data: EventData,
-    contact_email: str,
+    event_data: EventData = Body(..., embed=False),
+    contact_email: str = Query(..., description="Email of the contact"),
     merchant_id: UUID = Depends(get_merchant_id),
     crm_types: Optional[List[str]] = None,
     conn: Connection = Depends(get_conn)
@@ -658,6 +672,14 @@ async def sync_event(
             integration_id = integration["integration_id"]
             credentials = integration["credentials"]
             crm_settings = integration["settings"]
+
+            # Parse credentials if it's a string
+            if isinstance(credentials, str):
+                credentials = json.loads(credentials)
+
+            # Parse settings if it's a string
+            if isinstance(crm_settings, str):
+                crm_settings = json.loads(crm_settings)
 
             # Check if this event is enabled
             enabled_events = crm_settings.get("enabled_events", [])
@@ -726,6 +748,52 @@ def _apply_field_mapping(data: Dict[str, Any], field_mapping: Dict[str, str]) ->
             mapped[target_field] = mapped.pop(source_field)
 
     return mapped
+
+
+def _transform_contact_data(data: Dict[str, Any], crm_type: str) -> Dict[str, Any]:
+    """
+    Transform contact data to match CRM-specific API format.
+
+    Args:
+        data: Mapped contact data
+        crm_type: Type of CRM (klaviyo, salesforce, etc.)
+
+    Returns:
+        Transformed data dict matching CRM API requirements
+    """
+    if crm_type == "klaviyo":
+        # Klaviyo expects: {"attributes": {...}, "properties": {...}}
+        properties = data.pop("properties", None)
+
+        # Build attributes dict with Klaviyo field names
+        attributes = {}
+
+        # Map standard fields to Klaviyo attribute names
+        field_mappings = {
+            "email": "email",
+            "first_name": "first_name",
+            "last_name": "last_name",
+            "phone": "phone_number",  # Klaviyo uses phone_number
+            "company": "organization"  # Klaviyo uses organization
+        }
+
+        for source_field, klaviyo_field in field_mappings.items():
+            if source_field in data and data[source_field]:
+                attributes[klaviyo_field] = data[source_field]
+
+        # Add any remaining fields to attributes
+        for key, value in data.items():
+            if key not in field_mappings and value is not None:
+                attributes[key] = value
+
+        result = {"attributes": attributes}
+        if properties:
+            result["properties"] = properties
+
+        return result
+
+    # For other CRM types, return data as-is for now
+    return data
 
 
 async def _create_sync_log(
