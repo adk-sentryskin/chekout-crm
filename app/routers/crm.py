@@ -20,7 +20,8 @@ from ..models.crm import (
     CRMValidateRequest,
     CRMConnectRequest,
     ContactData,
-    EventData
+    EventData,
+    SyncEventRequest
 )
 from ..config import settings
 from ..response_models import success_response, error_response, ErrorCodes
@@ -607,7 +608,7 @@ async def sync_contact(
 
 @router.post("/sync/event")
 async def sync_event(
-    event_data: EventData = Body(..., embed=False),
+    request: SyncEventRequest,
     contact_email: str = Query(..., description="Email of the contact"),
     merchant_id: UUID = Depends(get_merchant_id),
     crm_types: Optional[List[str]] = None,
@@ -637,6 +638,9 @@ async def sync_event(
     - crm_types: Comma-separated list (optional)
     """
     try:
+        # Convert request to EventData
+        event_data = EventData(**request.dict())
+
         logger.info(f"Syncing event {event_data.event_name} for {contact_email}, merchant {merchant_id}")
 
         # Get active integrations
