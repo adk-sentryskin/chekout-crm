@@ -1,61 +1,73 @@
-from fastapi import Header, HTTPException, Request
-from firebase_admin import credentials, initialize_app, auth as fb_auth
+"""Dependencies for CRM microservice"""
+from fastapi import Header, HTTPException
+from uuid import UUID
+from typing import Optional
 from .config import settings
-from .services.request_logger import extract_request_metadata
-import os
+import logging
 
-# Initialize Firebase Admin once
-# ALWAYS use .env credentials for Firebase Admin (NOT service-account.json)
-cred = credentials.Certificate({
-    "type": "service_account",
-    "project_id": settings.GCP_PROJECT_ID,
-    "private_key_id": settings.SA_PRIVATE_KEY_ID,
-    "private_key": settings.SA_PRIVATE_KEY.replace("\\n", "\n"),
-    "client_email": settings.SA_CLIENT_EMAIL,
-    "client_id": settings.SA_CLIENT_ID,
-    "token_uri": "https://oauth2.googleapis.com/token",
-})
-initialize_app(cred)
-print(f"✅ Firebase Admin initialized for CRM with credentials: {settings.SA_CLIENT_EMAIL}")
+logger = logging.getLogger(__name__)
 
-async def get_current_merchant(authorization: str = Header(None)):
+
+async def get_merchant_id(x_merchant_id: str = Header(..., description="Merchant UUID")) -> UUID:
     """
-    Verify Firebase token and return merchant info.
-    This replaces get_current_user for CRM service.
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    Extract and validate merchant_id from request headers.
 
-    id_token = authorization.split(" ", 1)[1]
+    The parent service must provide X-Merchant-Id header with a valid UUID.
+    This replaces Firebase authentication - merchant identity is now provided
+    by the calling service.
+
+    Args:
+        x_merchant_id: UUID string from X-Merchant-Id header
+
+    Returns:
+        UUID: Validated merchant UUID
+
+    Raises:
+        HTTPException: If header is missing or invalid UUID
+    """
     try:
-        # Verify the ID token and check it's not revoked
-        decoded = fb_auth.verify_id_token(id_token, check_revoked=settings.CHECK_TOKEN_REVOCATION)
-    except fb_auth.RevokedIdTokenError:
-        raise HTTPException(status_code=401, detail="Token has been revoked")
-    except fb_auth.InvalidIdTokenError:
-        raise HTTPException(status_code=401, detail="Invalid ID token")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Token verification failed: {str(e)}")
+        merchant_uuid = UUID(x_merchant_id)
+        logger.debug(f"Merchant ID extracted: {merchant_uuid}")
+        return merchant_uuid
+    except ValueError:
+        logger.warning(f"Invalid merchant_id format: {x_merchant_id}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid X-Merchant-Id header: must be a valid UUID"
+        )
 
-    return {
-        "merchant_id": decoded["uid"],  # Changed from user_id to merchant_id
-        "email": decoded.get("email"),
-        "name": decoded.get("name"),
-        "email_verified": decoded.get("email_verified", False),
-        "phone": decoded.get("phone_number"),
-        "picture": decoded.get("picture"),
-        "issuer": decoded.get("iss"),
-        "audience": decoded.get("aud"),
-        "provider": decoded.get("firebase", {}).get("sign_in_provider", "unknown"),
-        "provider_data": decoded.get("firebase", {}).get("identities", {}),
-    }
 
-async def get_request_metadata(request: Request):
-    """Dependency to extract request metadata (IP, geolocation, device info, etc.)"""
-    return await extract_request_metadata(request)
+async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for service-to-service auth")) -> bool:
+    """
+    Optional API key verification for service-to-service authentication.
 
-# Simple RBAC guard
-async def require_roles(*allowed_roles: str):
-    async def checker(merchant=await get_current_merchant()):
-        return merchant
-    return checker
+    Only validates if API_KEY is configured in settings.
+    Use this dependency on endpoints that should only be called by trusted services.
+
+    Args:
+        x_api_key: API key from X-Api-Key header
+
+    Returns:
+        bool: True if valid or not configured
+
+    Raises:
+        HTTPException: If API key is invalid
+    """
+    if settings.API_KEY is None:
+        # API key auth not configured, allow request
+        return True
+
+    if x_api_key is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-Api-Key header"
+        )
+
+    if x_api_key != settings.API_KEY:
+        logger.warning(f"Invalid API key attempt")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
+
+    return True

@@ -1,11 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import HTTPException, RequestValidationError
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from .config import settings
 from .db import init_db
-from .routers import merchants as merchants_router
 from .routers import crm as crm_router
 from .exceptions import (
     APIException,
@@ -18,20 +15,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address)
-
 def create_app():
     app = FastAPI(
-        title="CRM Service API",
+        title="CRM Microservice API",
         version="1.0",
+        description="Microservice for managing CRM integrations and data synchronization",
         debug=settings.DEBUG
     )
 
-    # CORS
-    allowed = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",")]
+    # CORS (optional - only if CRM service needs direct frontend access)
+    if settings.CORS_ALLOWED_ORIGINS != "*":
+        allowed = [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",")]
+    else:
+        allowed = ["*"]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed if allowed != ["*"] else ["*"],
+        allow_origins=allowed,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -46,26 +46,25 @@ def create_app():
     @app.on_event("startup")
     async def _startup():
         await init_db()
-        logger.info("CRM Service database initialized")
+        logger.info("✅ CRM Microservice started successfully")
+        logger.info(f"   Environment: {settings.ENVIRONMENT}")
+        logger.info(f"   Port: {settings.PORT}")
+        logger.info(f"   Database: Connected")
 
     @app.on_event("shutdown")
     async def _shutdown():
-        logger.info("CRM Service shutting down")
+        logger.info("CRM Microservice shutting down...")
 
-    # Rate limit example: 100 req/min per IP on all endpoints
-    @app.middleware("http")
-    async def rate_limit(request: Request, call_next):
-        # You can selectively apply limiter here or with decorators per route
-        response = await call_next(request)
-        return response
-
-    # Include routers
-    app.include_router(merchants_router.router)
+    # Include CRM router only (no merchant management)
     app.include_router(crm_router.router)
 
     @app.get("/healthz")
     async def healthz():
-        """Health check endpoint with database connectivity."""
+        """
+        Health check endpoint with database connectivity.
+
+        Returns service status and database connection status.
+        """
         from .response_models import success_response
 
         try:
@@ -73,20 +72,73 @@ def create_app():
             from .db import pool
             if pool:
                 async with pool.acquire() as conn:
+                    # Test basic query
                     await conn.fetchval("SELECT 1")
-                db_status = "connected"
+
+                    # Check if tables exist
+                    tables_exist = await conn.fetchval("""
+                        SELECT COUNT(*)
+                        FROM information_schema.tables
+                        WHERE table_schema = 'crm'
+                          AND table_name IN ('crm_integrations', 'crm_sync_logs')
+                    """)
+
+                    if tables_exist == 2:
+                        db_status = "connected"
+                        schema_status = "ready"
+                    else:
+                        db_status = "connected"
+                        schema_status = "missing_tables"
             else:
                 db_status = "not_initialized"
+                schema_status = "unknown"
         except Exception as e:
             db_status = f"error: {str(e)}"
+            schema_status = "error"
 
         return success_response(
-            message="CRM Service is healthy",
+            message="CRM Microservice is healthy",
             data={
-                "database": db_status,
+                "service": "crm-microservice",
+                "version": "2.0",
                 "environment": settings.ENVIRONMENT,
-                "version": "1.0",
-                "service": "crm"
+                "database": db_status,
+                "schema": schema_status,
+                "features": [
+                    "CRM Integration Management",
+                    "Contact Sync",
+                    "Event Sync",
+                    "Field Mapping",
+                    "Multi-CRM Support"
+                ]
+            }
+        )
+
+    @app.get("/")
+    async def root():
+        """Root endpoint with API information."""
+        from .response_models import success_response
+
+        return success_response(
+            message="CRM Microservice API",
+            data={
+                "service": "crm-microservice",
+                "version": "2.0",
+                "docs": "/docs",
+                "health": "/healthz",
+                "endpoints": {
+                    "integration": [
+                        "POST /crm/validate",
+                        "POST /crm/connect",
+                        "GET /crm/{crm_type}/status",
+                        "DELETE /crm/{crm_type}/disconnect",
+                        "GET /crm/list"
+                    ],
+                    "sync": [
+                        "POST /crm/sync/contact",
+                        "POST /crm/sync/event"
+                    ]
+                }
             }
         )
 

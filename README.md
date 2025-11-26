@@ -1,205 +1,125 @@
-# CRM Service
+# CRM Microservice
 
-Standalone CRM integration service for managing merchant CRM connections (Klaviyo, Salesforce, Creatio, etc.).
+A standalone microservice for managing CRM integrations and synchronizing customer data across multiple CRM platforms.
 
-## Features
+## Overview
 
-- **Merchant Authentication**: Firebase-based authentication for merchant users
-- **CRM Integrations**: Support for multiple CRM platforms
-  - Klaviyo
-  - Salesforce
-  - Creatio
-  - (Extensible for more CRM providers)
-- **Secure Credential Storage**: PostgreSQL pgcrypto encryption for CRM credentials
-- **Sync Logging**: Complete audit trail of all CRM synchronization operations
-- **RESTful API**: FastAPI-based REST API with automatic documentation
+This service handles:
+- **CRM Integration Management**: Connect/disconnect CRM systems (Klaviyo, Salesforce, Creatio, etc.)
+- **Data Synchronization**: Send contacts and events to configured CRMs
+- **Field Mapping**: Transform data based on CRM-specific requirements
+- **Audit Logging**: Track all sync operations for debugging and analytics
 
 ## Architecture
 
-- **Framework**: FastAPI 0.115.4
-- **Database**: PostgreSQL (asyncpg for async connections)
-- **Authentication**: Firebase Admin SDK
-- **Schema**: `crm` schema (separate from checkout system)
-- **Entity Model**: `merchant_id` (UUID) as primary identifier
+### Microservice Pattern
+- **No merchant authentication**: Merchant ID is provided via `X-Merchant-Id` header by the parent service
+- **No Firebase dependencies**: Pure microservice without external auth dependencies
+- **Database isolation**: Uses `crm` schema separate from other services
+- **Encrypted credentials**: All CRM credentials encrypted using pgcrypto
 
-## Project Structure
+### Database Schema (2 Tables)
 
 ```
-chekout-crm/
-├── app/
-│   ├── main.py                 # FastAPI application
-│   ├── config.py               # Configuration management
-│   ├── db.py                   # Database connection pool
-│   ├── deps.py                 # Authentication dependencies
-│   ├── exceptions.py           # Error handlers
-│   ├── response_models.py      # Standardized responses
-│   ├── models/                 # Pydantic models
-│   │   ├── merchant.py
-│   │   └── crm.py
-│   ├── routers/                # API endpoints
-│   │   ├── merchants.py        # Merchant auth & profile
-│   │   └── crm.py              # CRM integrations
-│   ├── services/               # Business logic
-│   │   ├── request_logger.py
-│   │   └── crm/                # CRM services
-│   │       ├── base.py
-│   │       ├── manager.py
-│   │       └── providers/
-│   └── models.sql              # Database schema
-├── requirements.txt
-├── run.py
-├── .env.example
-└── README.md
+crm schema
+├── crm_integrations     (CRM configs + encrypted credentials)
+└── crm_sync_logs        (Audit trail of all sync operations)
 ```
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Environment Variables
+
+Copy `.env.example` to `.env` and configure:
 
 ```bash
-cd chekout-crm
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Database (required)
+DB_DSN=postgresql://user:pass@localhost:5432/db?options=-c%20search_path=crm
+
+# Environment
+ENVIRONMENT=development
+DEBUG=true
+LOG_LEVEL=INFO
+
+# CRM Encryption (required - exactly 32 characters)
+CRM_ENCRYPTION_KEY=your-32-character-key-here-1234
+
+# Service Port
+PORT=8001
+
+# Optional: API Key for service-to-service auth
+# API_KEY=your-internal-api-key
+
+# Optional: CORS
+CORS_ALLOWED_ORIGINS=*
+```
+
+### 2. Database Migration
+
+Run the migration to create the schema:
+
+```bash
+psql $DB_DSN -f migrations/001_simplified_crm_schema.sql
+```
+
+### 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your actual values
-```
-
-Required environment variables:
-- `DB_DSN`: PostgreSQL connection string (with `search_path=crm`)
-- `GCP_PROJECT_ID`, `SA_PRIVATE_KEY`, etc.: Firebase credentials
-- `CRM_ENCRYPTION_KEY`: 32-character key for encrypting CRM credentials
-- `PORT`: Service port (default: 8001)
-
-### 3. Initialize Database
-
-```bash
-# Connect to your PostgreSQL database
-psql $DB_DSN
-
-# Run the schema creation
-\i app/models.sql
 ```
 
 ### 4. Run the Service
 
-**Development mode (with auto-reload):**
-```bash
-uvicorn app.main:app --reload --port 8001
-```
-
-**Production mode:**
 ```bash
 python run.py
 ```
 
-The service will be available at: `http://localhost:8001`
+Or with uvicorn directly:
 
-## API Documentation
-
-Once running, visit:
-- **Interactive API docs**: http://localhost:8001/docs
-- **Alternative docs**: http://localhost:8001/redoc
-- **Health check**: http://localhost:8001/healthz
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+```
 
 ## API Endpoints
 
-### Authentication
+All endpoints require `X-Merchant-Id` header with a valid UUID.
 
-- `POST /auth/bootstrap` - Initialize merchant account on first login
-- `GET /auth/me` - Get current merchant profile
-- `PATCH /auth/profile` - Update merchant profile
+### CRM Integration Management
 
-### CRM Integrations
+#### `POST /crm/validate`
+Validate CRM credentials without saving
 
-- `POST /crm/validate` - Validate CRM credentials (test before saving)
-- `POST /crm/connect` - Connect a CRM integration
-- `GET /crm/{crm_type}/status` - Get integration status
-- `DELETE /crm/{crm_type}/disconnect` - Disconnect integration
-- `GET /crm/list` - List all merchant's integrations
+#### `POST /crm/connect`
+Connect a CRM integration with credentials and settings
 
-## Database Schema
+#### `GET /crm/{crm_type}/status`
+Get integration status
 
-The service uses the `crm` schema in PostgreSQL:
+#### `DELETE /crm/{crm_type}/disconnect`
+Disconnect CRM integration
 
-**Main Tables:**
-- `crm.merchants` - Merchant accounts (using merchant_id UUID)
-- `crm.crm_integrations` - CRM connection configurations
-- `crm.crm_sync_logs` - Complete sync operation history
-- `crm.login_logs` - Authentication audit trail
-- `crm.audit_logs` - General action logging
+#### `GET /crm/list`
+List all CRM integrations for merchant
 
-## CRM Providers
+### Data Synchronization
 
-### Klaviyo
-```json
-{
-  "crm_type": "klaviyo",
-  "credentials": {
-    "api_key": "pk_..."
-  }
-}
-```
+#### `POST /crm/sync/contact`
+Sync contact to configured CRMs
 
-### Salesforce
-```json
-{
-  "crm_type": "salesforce",
-  "credentials": {
-    "username": "user@example.com",
-    "password": "password",
-    "security_token": "token"
-  }
-}
-```
+#### `POST /crm/sync/event`
+Send event to configured CRMs
 
-### Creatio
-```json
-{
-  "crm_type": "creatio",
-  "credentials": {
-    "instance_url": "https://yourinstance.creatio.com",
-    "username": "user@example.com",
-    "password": "password"
-  }
-}
-```
+See full API documentation at `/docs` when service is running.
 
-## Development
+## Supported CRM Types
 
-### Adding a New CRM Provider
-
-1. Create provider class in `app/services/crm/providers/your_crm.py`
-2. Extend `BaseCRMService`
-3. Implement required methods:
-   - `validate_credentials()`
-   - `create_or_update_contact()`
-   - `send_event()`
-   - `get_contact()`
-4. Register in `app/services/crm/manager.py`
-5. Add CRM type to `CRMType` enum in `base.py`
-
-## Security
-
-- **Credential Encryption**: All CRM credentials encrypted at rest using PostgreSQL pgcrypto
-- **Firebase Authentication**: All endpoints protected by Firebase ID token verification
-- **Audit Logging**: Complete activity tracking for compliance
-- **CORS Protection**: Configurable allowed origins
-- **Rate Limiting**: SlowAPI integration for DDoS protection
-
-## Monitoring
-
-Health check endpoint:
-
-```bash
-curl http://localhost:8001/healthz
-```
+| CRM | Type ID | Status |
+|-----|---------|--------|
+| Klaviyo | `klaviyo` | ✅ Implemented |
+| Salesforce | `salesforce` | ✅ Implemented |
+| Creatio | `creatio` | ✅ Implemented |
+| HubSpot | `hubspot` | 🔜 Coming Soon |
 
 ## License
 
-Proprietary - All Rights Reserved
+Proprietary - All rights reserved
