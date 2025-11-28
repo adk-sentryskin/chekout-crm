@@ -2,6 +2,14 @@
 from pydantic import BaseModel, Field, UUID4
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from enum import Enum
+
+
+class SyncFrequency(str, Enum):
+    """Enum for sync frequency options"""
+    REAL_TIME = "real-time"
+    DAILY = "daily"  # Placeholder for future implementation
+    MONTHLY = "monthly"  # Placeholder for future implementation
 
 
 class CRMCredentials(BaseModel):
@@ -30,7 +38,10 @@ class CRMConnectRequest(BaseModel):
     """Request model for connecting a CRM integration"""
     crm_type: str = Field(..., description="Type of CRM (klaviyo, salesforce, creatio)")
     credentials: Dict[str, Any] = Field(..., description="CRM-specific credentials")
-    settings: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional CRM settings")
+    settings: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Optional CRM settings (field_mapping, enabled_events, etc.). Note: sync_frequency is automatically set to 'real-time'"
+    )
 
 
 class CRMIntegrationResponse(BaseModel):

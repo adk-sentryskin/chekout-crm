@@ -21,7 +21,8 @@ from ..models.crm import (
     CRMConnectRequest,
     ContactData,
     EventData,
-    SyncEventRequest
+    SyncEventRequest,
+    SyncFrequency
 )
 from ..config import settings
 from ..response_models import success_response, error_response, ErrorCodes
@@ -154,11 +155,12 @@ async def connect_crm(
       "credentials": {"api_key": "pk_..."},
       "settings": {
         "field_mapping": {"customer_name": "firstName"},
-        "sync_frequency": "real-time",
         "enabled_events": ["order_created"]
       }
     }
     ```
+
+    **Note:** sync_frequency is automatically set to "real-time". Daily and monthly sync options are placeholders for future implementation.
     """
     try:
         logger.info(f"Connecting {request.crm_type} integration for merchant {merchant_id}")
@@ -210,7 +212,11 @@ async def connect_crm(
         # Step 3: Prepare data
         now = datetime.now(timezone.utc)
         credentials_json = json.dumps(request.credentials)
-        settings_json = json.dumps(request.settings) if request.settings else json.dumps({})
+
+        # Automatically set sync_frequency to real-time
+        merged_settings = request.settings.copy() if request.settings else {}
+        merged_settings["sync_frequency"] = SyncFrequency.REAL_TIME.value
+        settings_json = json.dumps(merged_settings)
 
         if existing:
             # Update existing integration
@@ -484,10 +490,12 @@ async def sync_contact(
     conn: Connection = Depends(get_conn)
 ):
     """
-    Sync contact data to configured CRM systems.
+    Sync contact data to configured CRM systems in real-time.
 
     Sends the contact to all active CRMs (or specific CRMs if crm_types provided).
     Applies field mapping from integration settings.
+
+    **Note:** This endpoint performs real-time sync. All integrations are configured with real-time sync frequency.
 
     **Headers Required:**
     - X-Merchant-Id: UUID of the merchant
@@ -555,6 +563,11 @@ async def sync_contact(
             if isinstance(crm_settings, str):
                 crm_settings = json.loads(crm_settings)
 
+            # Verify sync_frequency is real-time (all integrations should have this)
+            sync_frequency = crm_settings.get("sync_frequency", SyncFrequency.REAL_TIME.value)
+            if sync_frequency != SyncFrequency.REAL_TIME.value:
+                logger.warning(f"Integration {integration_id} has non-real-time sync frequency: {sync_frequency}. Syncing anyway.")
+
             # Prepare contact data for CRM
             contact_dict = contact_data.dict()
 
@@ -615,7 +628,9 @@ async def sync_event(
     conn: Connection = Depends(get_conn)
 ):
     """
-    Send event/activity data to configured CRM systems.
+    Send event/activity data to configured CRM systems in real-time.
+
+    **Note:** This endpoint performs real-time event sync. All integrations are configured with real-time sync frequency.
 
     **Headers Required:**
     - X-Merchant-Id: UUID of the merchant
@@ -684,6 +699,11 @@ async def sync_event(
             # Parse settings if it's a string
             if isinstance(crm_settings, str):
                 crm_settings = json.loads(crm_settings)
+
+            # Verify sync_frequency is real-time (all integrations should have this)
+            sync_frequency = crm_settings.get("sync_frequency", SyncFrequency.REAL_TIME.value)
+            if sync_frequency != SyncFrequency.REAL_TIME.value:
+                logger.warning(f"Integration {integration_id} has non-real-time sync frequency: {sync_frequency}. Syncing anyway.")
 
             # Check if this event is enabled
             enabled_events = crm_settings.get("enabled_events", [])
