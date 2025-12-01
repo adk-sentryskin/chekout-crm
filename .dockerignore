@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Environment files (will be injected at runtime)
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+tests/
+
+# Documentation
+*.md
+docs/
+
+# Service Account Keys (use secrets management instead)
+service-key.json
+service-account.json
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Database migrations (if separate)
+migrations/
+
+# Temporary files
+*.tmp
+temp/
+.DS_Store
+Thumbs.db

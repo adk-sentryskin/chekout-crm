@@ -229,9 +229,9 @@ SELECT
     COUNT(*) as total_syncs,
     COUNT(*) FILTER (WHERE status = 'success') as successful_syncs,
     COUNT(*) FILTER (WHERE status = 'failed') as failed_syncs,
-    ROUND(AVG(duration_ms), 2) as avg_duration_ms,
-    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms), 2) as median_duration_ms,
-    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 2) as p95_duration_ms
+    ROUND(AVG(duration_ms)::NUMERIC, 2) as avg_duration_ms,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms)::NUMERIC, 2) as median_duration_ms,
+    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)::NUMERIC, 2) as p95_duration_ms
 FROM crm.crm_sync_logs
 WHERE created_at > NOW() - INTERVAL '7 days'
   AND status IN ('success', 'failed')
