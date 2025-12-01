@@ -108,7 +108,7 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
     environment:
       name: staging
       url: https://crm-microservice-staging-shopify-473015.a.run.app
@@ -143,75 +143,18 @@ jobs:
             API_KEY=crm-api-key:latest
 
   # =============================================================================
-  # Job 4: Deploy to Google Cloud Run (Production)
-  # =============================================================================
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    environment:
-      name: production
-      url: https://crm-microservice-shopify-473015.a.run.app
-
-    steps:
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Deploy to Cloud Run (Production)
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ env.SERVICE_NAME }}
-          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          region: ${{ env.REGION }}
-          flags: |
-            --port=8000
-            --cpu=2
-            --memory=1Gi
-            --min-instances=1
-            --max-instances=50
-            --timeout=300
-            --allow-unauthenticated
-            --concurrency=80
-          env_vars: |
-            ENVIRONMENT=production
-            DEBUG=false
-            LOG_LEVEL=WARNING
-          secrets: |
-            DB_DSN=crm-db-dsn-production:latest
-            CRM_ENCRYPTION_KEY=crm-encryption-key:latest
-            API_KEY=crm-api-key:latest
-
-      - name: Verify deployment
-        run: |
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --format='value(status.url)')
-
-          echo "Service URL: $SERVICE_URL"
-
-          # Test health endpoint
-          curl -f "$SERVICE_URL/healthz" || exit 1
-
-          echo "Deployment verified successfully!"
-
-  # =============================================================================
-  # Job 5: Notify on Failure
+  # Job 4: Notify on Deployment Status
   # =============================================================================
   notify:
     name: Notify on Deployment Status
     runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production]
+    needs: [deploy-staging]
     if: always()
 
     steps:
       - name: Deployment Status
         run: |
-          if [ "${{ needs.deploy-production.result }}" == "success" ]; then
-            echo "Production deployment successful!"
-          elif [ "${{ needs.deploy-staging.result }}" == "success" ]; then
+          if [ "${{ needs.deploy-staging.result }}" == "success" ]; then
             echo "Staging deployment successful!"
           else
             echo "Deployment failed or skipped"
