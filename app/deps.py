@@ -10,11 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def get_merchant_id(x_merchant_id: str = Header(..., description="Merchant UUID")) -> UUID:
     """
-    Extract and validate merchant_id from request headers.
-
-    The parent service must provide X-Merchant-Id header with a valid UUID.
-    This replaces Firebase authentication - merchant identity is now provided
-    by the calling service.
+    Extract and validate merchant_id from request headers.s
 
     Args:
         x_merchant_id: UUID string from X-Merchant-Id header
