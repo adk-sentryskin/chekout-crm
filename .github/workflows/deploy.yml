@@ -84,7 +84,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure Docker for GCR
         run: |
@@ -117,7 +117,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Deploy to Cloud Run (Staging)
         uses: google-github-actions/deploy-cloudrun@v2
@@ -158,7 +158,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Deploy to Cloud Run (Production)
         uses: google-github-actions/deploy-cloudrun@v2
