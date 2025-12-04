@@ -133,14 +133,6 @@ jobs:
             --max-instances=10
             --timeout=300
             --allow-unauthenticated
-          env_vars: |
-            ENVIRONMENT=staging
-            DEBUG=false
-            LOG_LEVEL=INFO
-          secrets: |
-            DB_DSN=crm-db-dsn-staging:latest
-            CRM_ENCRYPTION_KEY=crm-encryption-key:latest
-            API_KEY=crm-api-key:latest
 
   # =============================================================================
   # Job 4: Deploy to Google Cloud Run (Production)
