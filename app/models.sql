@@ -1,19 +1,17 @@
 -- ============================================================================
--- CRM Microservice - Simplified Schema Migration
+-- CRM Microservice - Idempotent Schema Migration
 -- ============================================================================
 -- This migration creates a minimal CRM microservice schema with only 2 tables.
 -- Merchant management is handled by the parent service.
+-- Safe to run multiple times - will only create objects if they don't exist.
 -- ============================================================================
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Drop existing schema and recreate (use CASCADE to drop dependent objects)
-DROP SCHEMA IF EXISTS crm CASCADE;
-
--- Create CRM schema (separate from other schemas)
-CREATE SCHEMA crm;
+-- Create CRM schema if it doesn't exist (safe, idempotent)
+CREATE SCHEMA IF NOT EXISTS crm;
 
 -- ============================================================================
 -- TABLE 1: CRM INTEGRATIONS
@@ -21,7 +19,7 @@ CREATE SCHEMA crm;
 -- Stores CRM connection configurations for each merchant
 -- One row per merchant-CRM pair (e.g., merchant A connects Klaviyo + Salesforce = 2 rows)
 
-CREATE TABLE crm.crm_integrations (
+CREATE TABLE IF NOT EXISTS crm.crm_integrations (
   integration_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- Merchant identifier (provided by parent service, no FK)
@@ -53,11 +51,11 @@ CREATE TABLE crm.crm_integrations (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_crm_integrations_merchant_id ON crm.crm_integrations(merchant_id);
-CREATE INDEX idx_crm_integrations_crm_type ON crm.crm_integrations(crm_type);
-CREATE INDEX idx_crm_integrations_is_active ON crm.crm_integrations(is_active);
-CREATE INDEX idx_crm_integrations_merchant_crm ON crm.crm_integrations(merchant_id, crm_type);
-CREATE INDEX idx_crm_integrations_sync_status ON crm.crm_integrations(sync_status);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_merchant_id ON crm.crm_integrations(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_crm_type ON crm.crm_integrations(crm_type);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_is_active ON crm.crm_integrations(is_active);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_merchant_crm ON crm.crm_integrations(merchant_id, crm_type);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_sync_status ON crm.crm_integrations(sync_status);
 
 COMMENT ON TABLE crm.crm_integrations IS 'Stores CRM integration configurations and encrypted credentials';
 COMMENT ON COLUMN crm.crm_integrations.merchant_id IS 'UUID from parent service (no foreign key)';
@@ -70,7 +68,7 @@ COMMENT ON COLUMN crm.crm_integrations.settings IS 'Non-sensitive CRM configurat
 -- Audit trail for every data sync sent to CRM systems
 -- Critical for debugging, monitoring, and analytics
 
-CREATE TABLE crm.crm_sync_logs (
+CREATE TABLE IF NOT EXISTS crm.crm_sync_logs (
   log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- Foreign key to integration (CASCADE delete)
@@ -119,14 +117,14 @@ CREATE TABLE crm.crm_sync_logs (
 );
 
 -- Indexes for performance and analytics
-CREATE INDEX idx_crm_sync_logs_integration_id ON crm.crm_sync_logs(integration_id);
-CREATE INDEX idx_crm_sync_logs_merchant_id ON crm.crm_sync_logs(merchant_id);
-CREATE INDEX idx_crm_sync_logs_crm_type ON crm.crm_sync_logs(crm_type);
-CREATE INDEX idx_crm_sync_logs_status ON crm.crm_sync_logs(status);
-CREATE INDEX idx_crm_sync_logs_created_at ON crm.crm_sync_logs(created_at DESC);
-CREATE INDEX idx_crm_sync_logs_entity ON crm.crm_sync_logs(entity_type, entity_id);
-CREATE INDEX idx_crm_sync_logs_operation ON crm.crm_sync_logs(operation_type);
-CREATE INDEX idx_crm_sync_logs_retry ON crm.crm_sync_logs(status, next_retry_at) WHERE status = 'retrying';
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_integration_id ON crm.crm_sync_logs(integration_id);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_merchant_id ON crm.crm_sync_logs(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_crm_type ON crm.crm_sync_logs(crm_type);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_status ON crm.crm_sync_logs(status);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_created_at ON crm.crm_sync_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_entity ON crm.crm_sync_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_operation ON crm.crm_sync_logs(operation_type);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_retry ON crm.crm_sync_logs(status, next_retry_at) WHERE status = 'retrying';
 
 COMMENT ON TABLE crm.crm_sync_logs IS 'Complete audit trail of all CRM sync operations';
 COMMENT ON COLUMN crm.crm_sync_logs.request_payload IS 'Exact data sent to CRM API';
@@ -147,12 +145,14 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger: Auto-update updated_at for crm_integrations
+DROP TRIGGER IF EXISTS update_crm_integrations_updated_at ON crm.crm_integrations;
 CREATE TRIGGER update_crm_integrations_updated_at
     BEFORE UPDATE ON crm.crm_integrations
     FOR EACH ROW
     EXECUTE FUNCTION crm.update_updated_at_column();
 
 -- Trigger: Auto-update updated_at for crm_sync_logs
+DROP TRIGGER IF EXISTS update_crm_sync_logs_updated_at ON crm.crm_sync_logs;
 CREATE TRIGGER update_crm_sync_logs_updated_at
     BEFORE UPDATE ON crm.crm_sync_logs
     FOR EACH ROW
@@ -198,6 +198,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger: Auto-calculate duration for sync logs
+DROP TRIGGER IF EXISTS calculate_crm_sync_duration ON crm.crm_sync_logs;
 CREATE TRIGGER calculate_crm_sync_duration
     BEFORE INSERT OR UPDATE ON crm.crm_sync_logs
     FOR EACH ROW
