@@ -152,27 +152,6 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Grant Secret Manager access to Cloud Run service account
-        run: |
-          # Get the compute service account
-          SERVICE_ACCOUNT="393304610205-compute@developer.gserviceaccount.com"
-
-          # Grant access to secrets
-          gcloud secrets add-iam-policy-binding crm-db-dsn-production \
-            --member="serviceAccount:${SERVICE_ACCOUNT}" \
-            --role="roles/secretmanager.secretAccessor" \
-            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-db-dsn-production"
-
-          gcloud secrets add-iam-policy-binding crm-encryption-key \
-            --member="serviceAccount:${SERVICE_ACCOUNT}" \
-            --role="roles/secretmanager.secretAccessor" \
-            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-encryption-key"
-
-          gcloud secrets add-iam-policy-binding crm-api-key \
-            --member="serviceAccount:${SERVICE_ACCOUNT}" \
-            --role="roles/secretmanager.secretAccessor" \
-            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-api-key"
-
       - name: Deploy to Cloud Run (Production)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
@@ -192,11 +171,9 @@ jobs:
             ENVIRONMENT=production
             DEBUG=false
             LOG_LEVEL=WARNING
-          secrets: |
-            DB_DSN=crm-db-dsn-production:latest
-            CRM_ENCRYPTION_KEY=crm-encryption-key:latest
-            API_KEY=crm-api-key:latest
-
+            DB_DSN=postgresql://user_dev:iol%40j39Rs1kp%24LY%3F@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,
+            CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN
+            API_KEY=
       - name: Verify deployment
         run: |
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
