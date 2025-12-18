@@ -152,6 +152,12 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Clear conflicting environment variables
+        run: |
+          gcloud run services update ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --clear-env-vars || echo "Service may not exist yet, continuing..."
+
       - name: Deploy to Cloud Run (Production)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
