@@ -221,7 +221,22 @@ async def connect_crm(
         """
         existing = await conn.fetchrow(check_query, merchant_id, request.crm_type)
 
-        # Step 3: Prepare data
+        # Step 3: Validate selected_fields if provided
+        valid_fields = ["first_name", "last_name", "email", "phone"]
+        if request.selected_fields is not None:
+            invalid_fields = [f for f in request.selected_fields if f not in valid_fields]
+            if invalid_fields:
+                return error_response(
+                    message=f"Invalid fields in selected_fields: {', '.join(invalid_fields)}",
+                    error_code=ErrorCodes.INVALID_INPUT,
+                    details={
+                        "field": "selected_fields",
+                        "invalid_fields": invalid_fields,
+                        "valid_fields": valid_fields
+                    }
+                ), 400
+
+        # Step 4: Prepare data
         now = datetime.now(timezone.utc)
         credentials_json = json.dumps(request.credentials)
 
@@ -238,6 +253,13 @@ async def connect_crm(
             merged_settings.pop("field_mapping", None)
 
         merged_settings["sync_frequency"] = SyncFrequency.REAL_TIME.value
+
+        # Store selected_fields and lead_quality in settings
+        if request.selected_fields is not None:
+            merged_settings["selected_fields"] = request.selected_fields
+        if request.lead_quality is not None:
+            merged_settings["lead_quality"] = request.lead_quality
+
         settings_json = json.dumps(merged_settings)
 
         if existing:
@@ -297,13 +319,16 @@ async def connect_crm(
                 now
             )
 
-        # Step 4: Format and return response
+        # Step 5: Format and return response
+        settings_data = result["settings"]
         integration_data = {
             "integration_id": str(result["integration_id"]),
             "merchant_id": str(result["merchant_id"]),
             "crm_type": result["crm_type"],
             "is_active": result["is_active"],
-            "settings": result["settings"],
+            "settings": settings_data,
+            "selected_fields": settings_data.get("selected_fields"),
+            "lead_quality": settings_data.get("lead_quality"),
             "created_at": result["created_at"].isoformat(),
             "updated_at": result["updated_at"].isoformat(),
             "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
@@ -364,12 +389,15 @@ async def get_crm_status(
                 data={"integration": None}
             )
 
+        settings_data = result["settings"]
         integration_data = {
             "integration_id": str(result["integration_id"]),
             "merchant_id": str(result["merchant_id"]),
             "crm_type": result["crm_type"],
             "is_active": result["is_active"],
-            "settings": result["settings"],
+            "settings": settings_data,
+            "selected_fields": settings_data.get("selected_fields"),
+            "lead_quality": settings_data.get("lead_quality"),
             "created_at": result["created_at"].isoformat(),
             "updated_at": result["updated_at"].isoformat(),
             "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
@@ -476,12 +504,15 @@ async def list_integrations(
 
         integrations = []
         for row in results:
+            settings_data = row["settings"]
             integrations.append({
                 "integration_id": str(row["integration_id"]),
                 "merchant_id": str(row["merchant_id"]),
                 "crm_type": row["crm_type"],
                 "is_active": row["is_active"],
-                "settings": row["settings"],
+                "settings": settings_data,
+                "selected_fields": settings_data.get("selected_fields"),
+                "lead_quality": settings_data.get("lead_quality"),
                 "created_at": row["created_at"].isoformat(),
                 "updated_at": row["updated_at"].isoformat(),
                 "last_sync_at": row["last_sync_at"].isoformat() if row["last_sync_at"] else None,

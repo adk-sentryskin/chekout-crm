@@ -38,6 +38,14 @@ class CRMConnectRequest(BaseModel):
     """Request model for connecting a CRM integration"""
     crm_type: str = Field(..., description="Type of CRM (klaviyo, salesforce, creatio)")
     credentials: Dict[str, Any] = Field(..., description="CRM-specific credentials")
+    selected_fields: Optional[List[str]] = Field(
+        None,
+        description="List of fields to sync (e.g., ['first_name', 'last_name', 'email', 'phone'])"
+    )
+    lead_quality: Optional[str] = Field(
+        None,
+        description="Lead quality category (placeholder for future implementation)"
+    )
     settings: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
         description="Optional CRM settings (field_mapping, enabled_events, etc.). Note: sync_frequency is automatically set to 'real-time'"
@@ -53,6 +61,8 @@ class CRMIntegrationResponse(BaseModel):
     sync_status: str
     sync_error: Optional[str] = None
     settings: Dict[str, Any] = {}
+    selected_fields: Optional[List[str]] = None
+    lead_quality: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     last_sync_at: Optional[datetime] = None
