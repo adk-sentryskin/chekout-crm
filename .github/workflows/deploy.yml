@@ -152,6 +152,27 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Grant Secret Manager access to Cloud Run service account
+        run: |
+          # Get the compute service account
+          SERVICE_ACCOUNT="393304610205-compute@developer.gserviceaccount.com"
+
+          # Grant access to secrets
+          gcloud secrets add-iam-policy-binding crm-db-dsn-production \
+            --member="serviceAccount:${SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-db-dsn-production"
+
+          gcloud secrets add-iam-policy-binding crm-encryption-key \
+            --member="serviceAccount:${SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-encryption-key"
+
+          gcloud secrets add-iam-policy-binding crm-api-key \
+            --member="serviceAccount:${SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project=${{ env.PROJECT_ID }} || echo "Already has access to crm-api-key"
+
       - name: Deploy to Cloud Run (Production)
         uses: google-github-actions/deploy-cloudrun@v2
         with:
