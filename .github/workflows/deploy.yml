@@ -152,34 +152,21 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Clear conflicting environment variables
-        run: |
-          gcloud run services update ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --clear-env-vars || echo "Service may not exist yet, continuing..."
-
       - name: Deploy to Cloud Run (Production)
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ env.SERVICE_NAME }}
-          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          region: ${{ env.REGION }}
-          flags: |
-            --port=8000
-            --cpu=2
-            --memory=1Gi
-            --min-instances=1
-            --max-instances=50
-            --timeout=300
-            --allow-unauthenticated
-            --concurrency=80
-          env_vars: |
-            ENVIRONMENT=production
-            DEBUG=false
-            LOG_LEVEL=WARNING
-            DB_DSN=postgresql://user_dev:iol%40j39Rs1kp%24LY%3F@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,
-            CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN
-            API_KEY=
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --port=8000 \
+            --cpu=2 \
+            --memory=1Gi \
+            --min-instances=1 \
+            --max-instances=50 \
+            --timeout=300 \
+            --allow-unauthenticated \
+            --concurrency=80 \
+            --set-env-vars="ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=WARNING,DB_DSN=postgresql://user_dev:iol%40j39Rs1kp%24LY%3F@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN,API_KEY=" \
+            --update-labels="managed-by=github-actions,commit-sha=${{ github.sha }}"
       - name: Verify deployment
         run: |
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
