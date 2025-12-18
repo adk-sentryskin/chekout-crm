@@ -163,10 +163,17 @@ jobs:
             --min-instances=1 \
             --max-instances=50 \
             --timeout=300 \
-            --allow-unauthenticated \
             --concurrency=80 \
             --set-env-vars="ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=WARNING,DB_DSN=postgresql://user_dev:iol%40j39Rs1kp%24LY%3F@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN,API_KEY=" \
             --update-labels="managed-by=github-actions,commit-sha=${{ github.sha }}"
+
+      - name: Set IAM policy to allow public access
+        run: |
+          gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --member=allUsers \
+            --role=roles/run.invoker
+
       - name: Verify deployment
         run: |
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
@@ -175,10 +182,26 @@ jobs:
 
           echo "Service URL: $SERVICE_URL"
 
-          # Test health endpoint
-          curl -f "$SERVICE_URL/healthz" || exit 1
+          # Wait for service to be ready
+          echo "Waiting 30 seconds for service to start..."
+          sleep 30
 
-          echo "Deployment verified successfully!"
+          # Test health endpoint with retry
+          echo "Testing health endpoint..."
+          for i in {1..5}; do
+            if curl -f -s "$SERVICE_URL/healthz"; then
+              echo ""
+              echo "✅ Deployment verified successfully!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          done
+
+          echo "❌ Health check failed after 5 attempts"
+          echo "Fetching recent logs..."
+          gcloud logs read --service=${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --limit=20
+          exit 1
 
   # =============================================================================
   # Job 5: Notify on Failure
