@@ -24,6 +24,8 @@ from ..models.crm import (
     SyncEventRequest,
     SyncFrequency
 )
+from ..schemas.standard_contact import StandardContactData, StandardEventData
+from ..services.field_mapper import field_mapping_service, FieldMappingError
 from ..config import settings
 from ..response_models import success_response, error_response, ErrorCodes
 
@@ -142,8 +144,14 @@ async def connect_crm(
     This endpoint:
     1. Validates the CRM credentials
     2. Encrypts and saves the credentials to the database
-    3. Stores optional settings (sync_frequency, field_mapping, etc.)
+    3. Stores optional settings (enabled_events, etc.)
     4. Returns the integration details
+
+    **✅ NEW: Field mapping is now handled automatically by the backend!**
+
+    You no longer need to provide `field_mapping` in settings.
+    Just use the standard contact schema when syncing, and the backend
+    will automatically transform data to the correct CRM-specific format.
 
     **Headers Required:**
     - X-Merchant-Id: UUID of the merchant
@@ -154,11 +162,15 @@ async def connect_crm(
       "crm_type": "klaviyo",
       "credentials": {"api_key": "pk_..."},
       "settings": {
-        "field_mapping": {"customer_name": "firstName"},
-        "enabled_events": ["order_created"]
+        "enabled_events": ["order_created", "cart_abandoned"]
       }
     }
     ```
+
+    **⚠️ Deprecated:**
+    - `field_mapping` in settings is deprecated and will be ignored
+    - Use standard contact schema (`/sync/contact`) instead
+    - Backend handles all field transformations automatically
 
     **Note:** sync_frequency is automatically set to "real-time". Daily and monthly sync options are placeholders for future implementation.
     """
@@ -215,6 +227,16 @@ async def connect_crm(
 
         # Automatically set sync_frequency to real-time
         merged_settings = request.settings.copy() if request.settings else {}
+
+        # ⚠️ Warn if deprecated field_mapping is provided
+        if "field_mapping" in merged_settings:
+            logger.warning(
+                f"Deprecated 'field_mapping' provided for {request.crm_type} integration by merchant {merchant_id}. "
+                "This will be ignored. Please use standard contact schema with /sync/contact endpoint."
+            )
+            # Remove field_mapping from settings (it's deprecated)
+            merged_settings.pop("field_mapping", None)
+
         merged_settings["sync_frequency"] = SyncFrequency.REAL_TIME.value
         settings_json = json.dumps(merged_settings)
 
@@ -484,7 +506,7 @@ async def list_integrations(
 
 @router.post("/sync/contact")
 async def sync_contact(
-    contact_data: ContactData,
+    contact_data: StandardContactData,
     merchant_id: UUID = Depends(get_merchant_id),
     crm_types: Optional[List[str]] = None,
     conn: Connection = Depends(get_conn)
@@ -492,15 +514,15 @@ async def sync_contact(
     """
     Sync contact data to configured CRM systems in real-time.
 
-    Sends the contact to all active CRMs (or specific CRMs if crm_types provided).
-    Applies field mapping from integration settings.
+    **✅ NEW: Uses STANDARD contact schema - no CRM-specific knowledge needed!**
 
-    **Note:** This endpoint performs real-time sync. All integrations are configured with real-time sync frequency.
+    Backend automatically transforms data to CRM-specific formats.
+    Clients send ONE standard format for ALL CRMs.
 
     **Headers Required:**
     - X-Merchant-Id: UUID of the merchant
 
-    **Request Body:**
+    **Request Body (Standard Schema):**
     ```json
     {
       "email": "customer@example.com",
@@ -508,15 +530,22 @@ async def sync_contact(
       "last_name": "Doe",
       "phone": "+1234567890",
       "company": "Acme Corp",
-      "properties": {
-        "source": "checkout",
-        "order_count": 5
+      "job_title": "CEO",
+      "city": "New York",
+      "state": "NY",
+      "country": "US",
+      "custom_properties": {
+        "lead_score": 85,
+        "source": "website",
+        "tags": ["enterprise", "hot_lead"]
       }
     }
     ```
 
     **Query Parameters:**
     - crm_types: Comma-separated list (e.g., ?crm_types=klaviyo,salesforce)
+
+    **Note:** This endpoint performs real-time sync. All integrations are configured with real-time sync frequency.
     """
     try:
         logger.info(f"Syncing contact {contact_data.email} for merchant {merchant_id}")
@@ -549,6 +578,8 @@ async def sync_contact(
 
         # Sync to each CRM
         results = {}
+        contact_dict = contact_data.dict(exclude_none=True)
+
         for integration in integrations:
             crm_type = integration["crm_type"]
             integration_id = integration["integration_id"]
@@ -568,14 +599,21 @@ async def sync_contact(
             if sync_frequency != SyncFrequency.REAL_TIME.value:
                 logger.warning(f"Integration {integration_id} has non-real-time sync frequency: {sync_frequency}. Syncing anyway.")
 
-            # Prepare contact data for CRM
-            contact_dict = contact_data.dict()
+            try:
+                # ✅ NEW: Use backend field mapping service
+                # Validates and transforms standard schema to CRM-specific format
+                transformed_data = field_mapping_service.transform_contact(
+                    contact_dict.copy(),  # Don't mutate original
+                    crm_type
+                )
 
-            # Apply field mapping if configured
-            mapped_data = _apply_field_mapping(contact_dict, crm_settings.get("field_mapping", {}))
+                logger.debug(f"Transformed contact for {crm_type}: {transformed_data}")
 
-            # Transform data to match CRM-specific format
-            transformed_data = _transform_contact_data(mapped_data, crm_type)
+            except FieldMappingError as e:
+                # Validation or transformation error
+                results[crm_type] = {"success": False, "error": f"Field mapping error: {str(e)}"}
+                logger.error(f"Field mapping failed for {crm_type}: {str(e)}")
+                continue
 
             # Create sync log (pending)
             log_id = await _create_sync_log(
@@ -617,6 +655,217 @@ async def sync_contact(
     except Exception as e:
         logger.error(f"Error syncing contact for merchant {merchant_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to sync contact")
+
+
+@router.post("/sync/contact/legacy")
+async def sync_contact_legacy(
+    contact_data: ContactData,
+    merchant_id: UUID = Depends(get_merchant_id),
+    crm_types: Optional[List[str]] = None,
+    conn: Connection = Depends(get_conn)
+):
+    """
+    **[DEPRECATED]** Legacy contact sync endpoint using old ContactData schema.
+
+    ⚠️ This endpoint is deprecated. Please migrate to `/sync/contact` with StandardContactData.
+
+    This endpoint is maintained for backward compatibility only.
+    It uses client-provided field_mapping from integration settings.
+
+    **Migration Guide:**
+    - Old: `{"properties": {...}}` → New: `{"custom_properties": {...}}`
+    - Old: Custom field names → New: Standard field names (first_name, last_name, etc.)
+    - Backend now handles all field transformations automatically
+    """
+    try:
+        logger.warning(f"Legacy sync endpoint used for merchant {merchant_id}. Please migrate to /sync/contact")
+
+        # Build query to get active integrations
+        if crm_types:
+            query = """
+                SELECT integration_id, crm_type,
+                       decrypt_credentials(encrypted_credentials, $1) as credentials,
+                       settings
+                FROM crm_integrations
+                WHERE merchant_id = $2 AND is_active = TRUE AND crm_type = ANY($3)
+            """
+            integrations = await conn.fetch(query, settings.CRM_ENCRYPTION_KEY, merchant_id, crm_types)
+        else:
+            query = """
+                SELECT integration_id, crm_type,
+                       decrypt_credentials(encrypted_credentials, $1) as credentials,
+                       settings
+                FROM crm_integrations
+                WHERE merchant_id = $2 AND is_active = TRUE
+            """
+            integrations = await conn.fetch(query, settings.CRM_ENCRYPTION_KEY, merchant_id)
+
+        if not integrations:
+            return error_response(
+                message="No active CRM integrations found",
+                error_code=ErrorCodes.CRM_INTEGRATION_NOT_FOUND
+            ), 404
+
+        # Sync to each CRM (using old method)
+        results = {}
+        for integration in integrations:
+            crm_type = integration["crm_type"]
+            integration_id = integration["integration_id"]
+            credentials = integration["credentials"]
+            crm_settings = integration["settings"]
+
+            if isinstance(credentials, str):
+                credentials = json.loads(credentials)
+
+            if isinstance(crm_settings, str):
+                crm_settings = json.loads(crm_settings)
+
+            contact_dict = contact_data.dict()
+
+            # Old method: Apply client-provided field mapping
+            mapped_data = _apply_field_mapping(contact_dict, crm_settings.get("field_mapping", {}))
+            transformed_data = _transform_contact_data(mapped_data, crm_type)
+
+            log_id = await _create_sync_log(
+                conn, integration_id, merchant_id, crm_type,
+                "create_contact", "contact", None, transformed_data
+            )
+
+            try:
+                result = await crm_manager.create_or_update_contact(
+                    CRMType(crm_type),
+                    credentials,
+                    transformed_data
+                )
+
+                await _update_sync_log(conn, log_id, "success", 200, result)
+                await conn.execute(
+                    "UPDATE crm_integrations SET last_sync_at = $1 WHERE integration_id = $2",
+                    datetime.now(timezone.utc), integration_id
+                )
+
+                results[crm_type] = {"success": True, "data": result}
+                logger.info(f"Contact synced successfully to {crm_type} (legacy endpoint)")
+
+            except (CRMAuthError, CRMAPIError) as e:
+                await _update_sync_log(conn, log_id, "failed", None, None, str(e))
+                results[crm_type] = {"success": False, "error": str(e)}
+                logger.error(f"Failed to sync contact to {crm_type}: {str(e)}")
+
+        return success_response(
+            message="Contact sync completed (legacy endpoint - please migrate to /sync/contact)",
+            data={"results": results}
+        )
+
+    except Exception as e:
+        logger.error(f"Error in legacy sync for merchant {merchant_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to sync contact")
+
+
+@router.get("/field-mappings/{crm_type}")
+async def get_field_mappings(
+    crm_type: str,
+    merchant_id: UUID = Depends(get_merchant_id)
+):
+    """
+    Get field mapping information for a specific CRM type.
+
+    Returns:
+    - Supported standard fields
+    - Required fields
+    - CRM-specific field names
+    - Example contact data
+
+    This helps clients understand what fields are available and how they map to CRMs.
+    """
+    try:
+        # Validate CRM type
+        if not field_mapping_service.get_supported_crms():
+            supported = field_mapping_service.get_supported_crms()
+        else:
+            supported = []
+
+        crm_lower = crm_type.lower()
+
+        if crm_lower not in field_mapping_service.get_supported_crms():
+            return error_response(
+                message=f"CRM type '{crm_type}' is not supported",
+                error_code=ErrorCodes.CRM_INVALID_TYPE,
+                details={
+                    "supported_crms": field_mapping_service.get_supported_crms()
+                }
+            ), 400
+
+        # Get mapping information
+        field_mapping = field_mapping_service.get_field_mapping(crm_lower)
+        supported_fields = field_mapping_service.get_supported_fields(crm_lower)
+        required_fields = field_mapping_service.get_required_fields(crm_lower)
+
+        return success_response(
+            message=f"Field mapping information for {crm_type}",
+            data={
+                "crm_type": crm_lower,
+                "supported_fields": supported_fields,
+                "required_fields": required_fields,
+                "field_mapping": field_mapping,
+                "example_standard_contact": {
+                    "email": "john.doe@example.com",
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "phone": "+1234567890",
+                    "company": "Acme Corp",
+                    "job_title": "CEO",
+                    "custom_properties": {
+                        "lead_score": 85,
+                        "source": "website"
+                    }
+                }
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting field mappings for {crm_type}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get field mapping information")
+
+
+@router.get("/field-mappings")
+async def list_all_field_mappings(
+    merchant_id: UUID = Depends(get_merchant_id)
+):
+    """
+    List all supported CRM types and their field mapping capabilities.
+
+    Returns overview of all supported CRMs with their required fields.
+    """
+    try:
+        supported_crms = field_mapping_service.get_supported_crms()
+
+        crm_info = []
+        for crm_type in supported_crms:
+            crm_info.append({
+                "crm_type": crm_type,
+                "required_fields": field_mapping_service.get_required_fields(crm_type),
+                "supported_fields_count": len(field_mapping_service.get_supported_fields(crm_type))
+            })
+
+        return success_response(
+            message="All supported CRM field mappings",
+            data={
+                "supported_crms": supported_crms,
+                "total_crms": len(supported_crms),
+                "crm_details": crm_info,
+                "standard_schema_fields": [
+                    "email", "first_name", "last_name", "phone", "company",
+                    "job_title", "department", "street_address", "city", "state",
+                    "postal_code", "country", "website", "timezone", "language",
+                    "custom_properties"
+                ]
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error listing field mappings: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list field mappings")
 
 
 @router.post("/sync/event")
