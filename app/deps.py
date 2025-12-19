@@ -1,6 +1,5 @@
 """Dependencies for CRM microservice"""
 from fastapi import Header, HTTPException
-from uuid import UUID
 from typing import Optional
 from .config import settings
 import logging
@@ -8,29 +7,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def get_user_id(x_user_id: str = Header(..., description="Firebase User ID")) -> UUID:
+async def get_user_id(x_user_id: str = Header(..., description="Firebase User ID")) -> str:
     """
     Extract and validate user_id from request headers.
 
     Args:
-        x_user_id: UUID string from X-User-Id header
+        x_user_id: Firebase user ID from X-User-Id header
 
     Returns:
-        UUID: Validated user UUID
+        str: Validated user ID
 
     Raises:
-        HTTPException: If header is missing or invalid UUID
+        HTTPException: If header is missing or invalid
     """
-    try:
-        user_uuid = UUID(x_user_id)
-        logger.debug(f"User ID extracted: {user_uuid}")
-        return user_uuid
-    except ValueError:
-        logger.warning(f"Invalid user_id format: {x_user_id}")
+    if not x_user_id or not x_user_id.strip():
+        logger.warning("Empty user_id provided")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid X-User-Id header: must be a valid UUID"
+            detail="Invalid X-User-Id header: cannot be empty"
         )
+
+    logger.debug(f"User ID extracted: {x_user_id}")
+    return x_user_id.strip()
 
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for service-to-service auth")) -> bool:

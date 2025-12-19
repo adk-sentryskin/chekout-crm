@@ -35,7 +35,7 @@ router = APIRouter(prefix="/crm", tags=["crm"])
 @router.post("/validate")
 async def validate_crm_credentials(
     request: CRMValidateRequest,
-    user_id: UUID = Depends(get_user_id)
+    user_id: str = Depends(get_user_id)
 ):
     """
     Validate CRM credentials without saving them.
@@ -134,7 +134,7 @@ async def validate_crm_credentials(
 @router.post("/connect")
 async def connect_crm(
     request: CRMConnectRequest,
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     conn: Connection = Depends(get_conn)
 ):
     """
@@ -340,7 +340,7 @@ async def connect_crm(
 @router.get("/{crm_type}/status")
 async def get_crm_status(
     crm_type: str,
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     conn: Connection = Depends(get_conn)
 ):
     """
@@ -408,7 +408,7 @@ async def get_crm_status(
 @router.delete("/{crm_type}/disconnect")
 async def disconnect_crm(
     crm_type: str,
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     conn: Connection = Depends(get_conn)
 ):
     """
@@ -467,7 +467,7 @@ async def disconnect_crm(
 
 @router.get("/list")
 async def list_integrations(
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     conn: Connection = Depends(get_conn)
 ):
     """
@@ -525,7 +525,7 @@ async def list_integrations(
 @router.post("/sync/contact")
 async def sync_contact(
     contact_data: StandardContactData,
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     crm_types: Optional[List[str]] = None,
     conn: Connection = Depends(get_conn)
 ):
@@ -677,7 +677,7 @@ async def sync_contact(
 @router.get("/field-mappings/{crm_type}")
 async def get_field_mappings(
     crm_type: str,
-    user_id: UUID = Depends(get_user_id)
+    user_id: str = Depends(get_user_id)
 ):
     """
     Get field mapping information for a specific CRM type.
@@ -742,7 +742,7 @@ async def get_field_mappings(
 
 @router.get("/field-mappings")
 async def list_all_field_mappings(
-    user_id: UUID = Depends(get_user_id)
+    user_id: str = Depends(get_user_id)
 ):
     """
     List all supported CRM types and their field mapping capabilities.
@@ -784,7 +784,7 @@ async def list_all_field_mappings(
 async def sync_event(
     request: SyncEventRequest,
     contact_email: str = Query(..., description="Email of the contact"),
-    user_id: UUID = Depends(get_user_id),
+    user_id: str = Depends(get_user_id),
     crm_types: Optional[List[str]] = None,
     conn: Connection = Depends(get_conn)
 ):
@@ -916,7 +916,7 @@ async def sync_event(
 async def _create_sync_log(
     conn: Connection,
     integration_id: UUID,
-    user_id: UUID,
+    user_id: str,
     crm_type: str,
     operation_type: str,
     entity_type: str,

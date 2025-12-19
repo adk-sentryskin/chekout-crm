@@ -62,8 +62,9 @@ Run the migrations to create/update the schema:
 # Initial schema (if new installation)
 psql $DB_DSN -f app/models.sql
 
-# Migration from merchant_id to user_id (if upgrading)
+# Migrations (if upgrading from previous versions)
 psql $DB_DSN -f migrations/001_rename_merchant_id_to_user_id.sql
+psql $DB_DSN -f migrations/002_change_user_id_to_text.sql
 ```
 
 ### 3. Install Dependencies
