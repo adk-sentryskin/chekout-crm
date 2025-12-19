@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     CRM_ENCRYPTION_KEY: str  # Required: 32-character key for encrypting CRM credentials
 
     # CRM Service Port
-    PORT: int = 8001
+    PORT: int = 8000
 
     # Optional: API Key for service-to-service authentication
     API_KEY: str | None = None
