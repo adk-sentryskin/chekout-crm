@@ -141,7 +141,7 @@ async def extract_request_metadata(request: Request) -> Dict[str, Any]:
 
 async def log_login_attempt(
     conn: Connection,
-    merchant_id: Optional[str],
+    user_id: Optional[str],
     email: Optional[str],
     auth_provider: Optional[str],
     success: bool,
@@ -150,12 +150,12 @@ async def log_login_attempt(
 ):
     """
     Log a login attempt (success or failure) to the database
-    Changed user_id to merchant_id for CRM service
+    Using user_id for CRM service
     """
     try:
         await conn.execute("""
             INSERT INTO login_logs (
-                merchant_id, email, auth_provider, success, failure_reason,
+                user_id, email, auth_provider, success, failure_reason,
                 ip_address, country_code, country_name, city, region,
                 user_agent, browser_name, browser_version, os_name, os_version,
                 device_type, device_brand, device_model,
@@ -170,7 +170,7 @@ async def log_login_attempt(
                 $23, $24, $25, $26
             )
         """,
-            merchant_id, email, auth_provider, success, failure_reason,
+            user_id, email, auth_provider, success, failure_reason,
             request_metadata.get("ip_address"),
             request_metadata.get("country_code"),
             request_metadata.get("country_name"),
@@ -195,7 +195,7 @@ async def log_login_attempt(
         )
 
         logger.info(
-            f"Login attempt logged: merchant={merchant_id or email}, "
+            f"Login attempt logged: merchant={user_id or email}, "
             f"success={success}, provider={auth_provider}, "
             f"ip={request_metadata.get('ip_address')}, "
             f"country={request_metadata.get('country_code')}, "
@@ -208,7 +208,7 @@ async def log_login_attempt(
 async def log_audit_event(
     conn: Connection,
     action: str,
-    merchant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
     resource_type: Optional[str] = None,
     resource_id: Optional[str] = None,
     details: Optional[Dict[str, Any]] = None,
@@ -216,21 +216,21 @@ async def log_audit_event(
 ):
     """
     Log an audit event (any important action in the system)
-    Changed user_id to merchant_id for CRM service
+    Using user_id for CRM service
     """
     try:
         details_json = json.dumps(details) if details else None
 
         await conn.execute("""
             INSERT INTO audit_logs (
-                merchant_id, action, resource_type, resource_id, details,
+                user_id, action, resource_type, resource_id, details,
                 ip_address, user_agent, referer, origin, endpoint, method
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10, $11
             )
         """,
-            merchant_id, action, resource_type, resource_id, details_json,
+            user_id, action, resource_type, resource_id, details_json,
             request_metadata.get("ip_address") if request_metadata else None,
             request_metadata.get("user_agent") if request_metadata else None,
             request_metadata.get("referer") if request_metadata else None,
@@ -240,7 +240,7 @@ async def log_audit_event(
         )
 
         logger.info(
-            f"Audit event logged: action={action}, merchant={merchant_id}, "
+            f"Audit event logged: action={action}, merchant={user_id}, "
             f"resource={resource_type}:{resource_id}"
         )
     except Exception as e:
@@ -249,7 +249,7 @@ async def log_audit_event(
 
 async def get_merchant_login_history(
     conn: Connection,
-    merchant_id: str,
+    user_id: str,
     limit: int = 50
 ) -> list:
     """
@@ -263,17 +263,17 @@ async def get_merchant_login_history(
             is_mobile, is_tablet, is_desktop,
             created_at
         FROM login_logs
-        WHERE merchant_id = $1
+        WHERE user_id = $1
         ORDER BY created_at DESC
         LIMIT $2
-    """, merchant_id, limit)
+    """, user_id, limit)
 
     return [dict(row) for row in rows]
 
 
 async def get_suspicious_logins(
     conn: Connection,
-    merchant_id: str,
+    user_id: str,
     days: int = 30
 ) -> list:
     """
@@ -285,9 +285,9 @@ async def get_suspicious_logins(
             browser_name, os_name, device_type,
             success, created_at
         FROM login_logs
-        WHERE merchant_id = $1
+        WHERE user_id = $1
           AND created_at > NOW() - INTERVAL '%s days'
         ORDER BY created_at DESC
-    """ % days, merchant_id)
+    """ % days, user_id)
 
     return [dict(row) for row in rows]

@@ -55,7 +55,7 @@ class CRMConnectRequest(BaseModel):
 class CRMIntegrationResponse(BaseModel):
     """Response model for CRM integration"""
     integration_id: UUID4
-    merchant_id: UUID4
+    user_id: UUID4
     crm_type: str
     is_active: bool
     sync_status: str
@@ -75,7 +75,7 @@ class CRMSyncLogResponse(BaseModel):
     """Response model for CRM sync log"""
     log_id: UUID4
     integration_id: UUID4
-    merchant_id: UUID4
+    user_id: UUID4
     crm_type: str
     operation_type: str
     entity_type: str
@@ -89,16 +89,6 @@ class CRMSyncLogResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class ContactData(BaseModel):
-    """Model for contact data to sync to CRM"""
-    email: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone: Optional[str] = None
-    company: Optional[str] = None
-    properties: Optional[Dict[str, Any]] = None
 
 
 class EventData(BaseModel):

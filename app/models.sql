@@ -16,14 +16,14 @@ CREATE SCHEMA IF NOT EXISTS crm;
 -- ============================================================================
 -- TABLE 1: CRM INTEGRATIONS
 -- ============================================================================
--- Stores CRM connection configurations for each merchant
--- One row per merchant-CRM pair (e.g., merchant A connects Klaviyo + Salesforce = 2 rows)
+-- Stores CRM connection configurations for each user
+-- One row per user-CRM pair (e.g., user A connects Klaviyo + Salesforce = 2 rows)
 
 CREATE TABLE IF NOT EXISTS crm.crm_integrations (
   integration_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  -- Merchant identifier (provided by parent service, no FK)
-  merchant_id UUID NOT NULL,
+  -- User identifier (Firebase user ID from parent service, no FK)
+  user_id UUID NOT NULL,
 
   -- CRM type: 'klaviyo', 'salesforce', 'creatio', 'hubspot', etc.
   crm_type TEXT NOT NULL,
@@ -46,19 +46,19 @@ CREATE TABLE IF NOT EXISTS crm.crm_integrations (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_sync_at TIMESTAMPTZ,
 
-  -- Constraint: One integration per merchant per CRM type
-  UNIQUE(merchant_id, crm_type)
+  -- Constraint: One integration per user per CRM type
+  UNIQUE(user_id, crm_type)
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_crm_integrations_merchant_id ON crm.crm_integrations(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_user_id ON crm.crm_integrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_crm_integrations_crm_type ON crm.crm_integrations(crm_type);
 CREATE INDEX IF NOT EXISTS idx_crm_integrations_is_active ON crm.crm_integrations(is_active);
-CREATE INDEX IF NOT EXISTS idx_crm_integrations_merchant_crm ON crm.crm_integrations(merchant_id, crm_type);
+CREATE INDEX IF NOT EXISTS idx_crm_integrations_user_crm ON crm.crm_integrations(user_id, crm_type);
 CREATE INDEX IF NOT EXISTS idx_crm_integrations_sync_status ON crm.crm_integrations(sync_status);
 
 COMMENT ON TABLE crm.crm_integrations IS 'Stores CRM integration configurations and encrypted credentials';
-COMMENT ON COLUMN crm.crm_integrations.merchant_id IS 'UUID from parent service (no foreign key)';
+COMMENT ON COLUMN crm.crm_integrations.user_id IS 'Firebase user ID from parent service (e.g., p9uOHM8ABHgwBYGT0dRpZmfyUWn1)';
 COMMENT ON COLUMN crm.crm_integrations.encrypted_credentials IS 'Encrypted JSON credentials using pgcrypto';
 COMMENT ON COLUMN crm.crm_integrations.settings IS 'Non-sensitive CRM configuration (field mapping, sync settings, etc.)';
 
@@ -74,8 +74,8 @@ CREATE TABLE IF NOT EXISTS crm.crm_sync_logs (
   -- Foreign key to integration (CASCADE delete)
   integration_id UUID NOT NULL REFERENCES crm.crm_integrations(integration_id) ON DELETE CASCADE,
 
-  -- Denormalized merchant_id for fast queries (no FK)
-  merchant_id UUID NOT NULL,
+  -- Denormalized user_id for fast queries (no FK)
+  user_id UUID NOT NULL,
 
   -- CRM details
   crm_type TEXT NOT NULL,
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS crm.crm_sync_logs (
 
   -- Metadata for debugging
   source TEXT,                   -- 'api', 'webhook', 'cron', 'manual'
-  triggered_by TEXT,             -- merchant_id or 'system'
+  triggered_by TEXT,             -- user_id or 'system'
   endpoint TEXT,                 -- CRM API endpoint called
 
   -- Timestamps
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS crm.crm_sync_logs (
 
 -- Indexes for performance and analytics
 CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_integration_id ON crm.crm_sync_logs(integration_id);
-CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_merchant_id ON crm.crm_sync_logs(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_user_id ON crm.crm_sync_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_crm_type ON crm.crm_sync_logs(crm_type);
 CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_status ON crm.crm_sync_logs(status);
 CREATE INDEX IF NOT EXISTS idx_crm_sync_logs_created_at ON crm.crm_sync_logs(created_at DESC);
@@ -213,15 +213,15 @@ COMMENT ON FUNCTION crm.calculate_duration IS 'Auto-calculates duration_ms from 
 -- View: CRM Integration Summary
 CREATE OR REPLACE VIEW crm.integration_summary AS
 SELECT
-    merchant_id,
+    user_id,
     COUNT(*) as total_integrations,
     COUNT(*) FILTER (WHERE is_active = TRUE) as active_integrations,
     ARRAY_AGG(DISTINCT crm_type) FILTER (WHERE is_active = TRUE) as active_crms,
     MAX(last_sync_at) as last_sync_at
 FROM crm.crm_integrations
-GROUP BY merchant_id;
+GROUP BY user_id;
 
-COMMENT ON VIEW crm.integration_summary IS 'Summary of CRM integrations per merchant';
+COMMENT ON VIEW crm.integration_summary IS 'Summary of CRM integrations per user';
 
 -- View: Sync Performance by CRM Type
 CREATE OR REPLACE VIEW crm.sync_performance AS

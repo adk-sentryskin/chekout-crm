@@ -8,28 +8,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def get_merchant_id(x_merchant_id: str = Header(..., description="Merchant UUID")) -> UUID:
+async def get_user_id(x_user_id: str = Header(..., description="Firebase User ID")) -> UUID:
     """
-    Extract and validate merchant_id from request headers.s
+    Extract and validate user_id from request headers.
 
     Args:
-        x_merchant_id: UUID string from X-Merchant-Id header
+        x_user_id: UUID string from X-User-Id header
 
     Returns:
-        UUID: Validated merchant UUID
+        UUID: Validated user UUID
 
     Raises:
         HTTPException: If header is missing or invalid UUID
     """
     try:
-        merchant_uuid = UUID(x_merchant_id)
-        logger.debug(f"Merchant ID extracted: {merchant_uuid}")
-        return merchant_uuid
+        user_uuid = UUID(x_user_id)
+        logger.debug(f"User ID extracted: {user_uuid}")
+        return user_uuid
     except ValueError:
-        logger.warning(f"Invalid merchant_id format: {x_merchant_id}")
+        logger.warning(f"Invalid user_id format: {x_user_id}")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid X-Merchant-Id header: must be a valid UUID"
+            detail=f"Invalid X-User-Id header: must be a valid UUID"
         )
 
 

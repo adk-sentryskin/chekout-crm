@@ -265,12 +265,12 @@ class CRMManager:
         return results
 
     # Database placeholder methods
-    async def get_merchant_crm_integrations(self, merchant_id: str) -> List[Dict[str, Any]]:
+    async def get_user_crm_integrations(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        Placeholder: Get all active CRM integrations for a merchant from database.
+        Placeholder: Get all active CRM integrations for a user from database.
 
         Args:
-            merchant_id: Merchant identifier
+            user_id: User identifier
 
         Returns:
             List of CRM integration configs
@@ -279,22 +279,22 @@ class CRMManager:
         Example query:
             SELECT crm_type, encrypted_credentials, settings, is_active
             FROM crm_integrations
-            WHERE merchant_id = $1 AND is_active = TRUE
+            WHERE user_id = $1 AND is_active = TRUE
         """
         raise NotImplementedError("Database integration pending")
 
     async def save_crm_integration(
         self,
-        merchant_id: str,
+        user_id: str,
         crm_type: CRMType,
         credentials: Dict[str, Any],
         settings: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Placeholder: Save or update a CRM integration for a merchant in database.
+        Placeholder: Save or update a CRM integration for a user in database.
 
         Args:
-            merchant_id: Merchant identifier
+            user_id: User identifier
             crm_type: Type of CRM
             credentials: Authentication credentials (should be encrypted)
             settings: Optional integration settings
@@ -304,9 +304,9 @@ class CRMManager:
 
         TODO: Implement database insertion/update with credential encryption
         Example query:
-            INSERT INTO crm_integrations (merchant_id, crm_type, encrypted_credentials, settings)
+            INSERT INTO crm_integrations (user_id, crm_type, encrypted_credentials, settings)
             VALUES ($1, $2, encrypt($3), $4)
-            ON CONFLICT (merchant_id, crm_type) DO UPDATE
+            ON CONFLICT (user_id, crm_type) DO UPDATE
             SET encrypted_credentials = encrypt($3), settings = $4, updated_at = NOW()
             RETURNING integration_id, created_at, updated_at
         """
@@ -314,14 +314,14 @@ class CRMManager:
 
     async def delete_crm_integration(
         self,
-        merchant_id: str,
+        user_id: str,
         crm_type: CRMType
     ) -> bool:
         """
-        Placeholder: Soft delete a CRM integration for a merchant in database.
+        Placeholder: Soft delete a CRM integration for a user in database.
 
         Args:
-            merchant_id: Merchant identifier
+            user_id: User identifier
             crm_type: Type of CRM
 
         Returns:
@@ -331,7 +331,7 @@ class CRMManager:
         Example query:
             UPDATE crm_integrations
             SET is_active = FALSE, updated_at = NOW()
-            WHERE merchant_id = $1 AND crm_type = $2
+            WHERE user_id = $1 AND crm_type = $2
             RETURNING integration_id
         """
         raise NotImplementedError("Database integration pending")
