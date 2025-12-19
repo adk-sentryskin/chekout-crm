@@ -141,10 +141,10 @@ See full API documentation at `/docs` when service is running.
 
 | CRM | Type ID | Status |
 |-----|---------|--------|
-| Klaviyo | `klaviyo` | ✅ Implemented |
-| Salesforce | `salesforce` | ✅ Implemented |
-| Creatio | `creatio` | ✅ Implemented |
-| HubSpot | `hubspot` | 🔜 Coming Soon |
+| Klaviyo | `klaviyo` | Implemented |
+| Salesforce | `salesforce` | Implemented |
+| Creatio | `creatio` | Implemented |
+| HubSpot | `hubspot` | Coming Soon |
 
 ## License
 

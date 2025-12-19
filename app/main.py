@@ -46,7 +46,7 @@ def create_app():
     @app.on_event("startup")
     async def _startup():
         await init_db()
-        logger.info("✅ CRM Microservice started successfully")
+        logger.info("CRM Microservice started successfully")
         logger.info(f"   Environment: {settings.ENVIRONMENT}")
         logger.info(f"   Port: {settings.PORT}")
         logger.info(f"   Database: Connected (schema auto-initialized)")

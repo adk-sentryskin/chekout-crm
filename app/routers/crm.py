@@ -140,17 +140,8 @@ async def connect_crm(
     """
     Connect a CRM integration for the merchant.
 
-    This endpoint:
-    1. Validates the CRM credentials
-    2. Encrypts and saves the credentials to the database
-    3. Stores optional settings (enabled_events, etc.)
-    4. Returns the integration details
-
-    **✅ NEW: Field mapping is now handled automatically by the backend!**
-
-    You no longer need to provide `field_mapping` in settings.
-    Just use the standard contact schema when syncing, and the backend
-    will automatically transform data to the correct CRM-specific format.
+    Validates credentials, encrypts and stores them securely, and configures
+    integration settings. Field mapping is handled automatically by the backend.
 
     **Headers Required:**
     - X-User-Id: Firebase user ID
@@ -166,12 +157,9 @@ async def connect_crm(
     }
     ```
 
-    **⚠️ Deprecated:**
-    - `field_mapping` in settings is deprecated and will be ignored
-    - Use standard contact schema (`/sync/contact`) instead
-    - Backend handles all field transformations automatically
-
-    **Note:** sync_frequency is automatically set to "real-time". Daily and monthly sync options are placeholders for future implementation.
+    **Response:**
+    Returns the connected integration details including integration_id, settings,
+    and sync status.
     """
     try:
         logger.info(f"Connecting {request.crm_type} integration for merchant {user_id}")
@@ -242,7 +230,7 @@ async def connect_crm(
         # Automatically set sync_frequency to real-time
         merged_settings = request.settings.copy() if request.settings else {}
 
-        # ⚠️ Warn if deprecated field_mapping is provided
+        # Warn if deprecated field_mapping is provided
         if "field_mapping" in merged_settings:
             logger.warning(
                 f"Deprecated 'field_mapping' provided for {request.crm_type} integration by merchant {user_id}. "
@@ -544,15 +532,13 @@ async def sync_contact(
     """
     Sync contact data to configured CRM systems in real-time.
 
-    **✅ NEW: Uses STANDARD contact schema - no CRM-specific knowledge needed!**
-
-    Backend automatically transforms data to CRM-specific formats.
-    Clients send ONE standard format for ALL CRMs.
+    Accepts a standard contact schema and automatically transforms it to match
+    each CRM's requirements. Syncs to all active integrations or specific CRMs.
 
     **Headers Required:**
     - X-User-Id: Firebase user ID
 
-    **Request Body (Standard Schema):**
+    **Request Body:**
     ```json
     {
       "email": "customer@example.com",
@@ -573,9 +559,10 @@ async def sync_contact(
     ```
 
     **Query Parameters:**
-    - crm_types: Comma-separated list (e.g., ?crm_types=klaviyo,salesforce)
+    - crm_types: Optional comma-separated list (e.g., ?crm_types=klaviyo,salesforce)
 
-    **Note:** This endpoint performs real-time sync. All integrations are configured with real-time sync frequency.
+    **Response:**
+    Returns sync results for each CRM including success status and any errors.
     """
     try:
         logger.info(f"Syncing contact {contact_data.email} for merchant {user_id}")
@@ -630,7 +617,7 @@ async def sync_contact(
                 logger.warning(f"Integration {integration_id} has non-real-time sync frequency: {sync_frequency}. Syncing anyway.")
 
             try:
-                # ✅ NEW: Use backend field mapping service
+                # Use backend field mapping service
                 # Validates and transforms standard schema to CRM-specific format
                 transformed_data = field_mapping_service.transform_contact(
                     contact_dict.copy(),  # Don't mutate original
