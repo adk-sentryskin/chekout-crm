@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS crm.crm_integrations (
   integration_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- User identifier (Firebase user ID from parent service, no FK)
-  user_id UUID NOT NULL,
+  user_id TEXT NOT NULL,
 
   -- CRM type: 'klaviyo', 'salesforce', 'creatio', 'hubspot', etc.
   crm_type TEXT NOT NULL,
@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_crm_integrations_user_crm ON crm.crm_integrations
 CREATE INDEX IF NOT EXISTS idx_crm_integrations_sync_status ON crm.crm_integrations(sync_status);
 
 COMMENT ON TABLE crm.crm_integrations IS 'Stores CRM integration configurations and encrypted credentials';
-COMMENT ON COLUMN crm.crm_integrations.user_id IS 'Firebase user ID from parent service (e.g., p9uOHM8ABHgwBYGT0dRpZmfyUWn1)';
+COMMENT ON COLUMN crm.crm_integrations.user_id IS 'Firebase user ID (alphanumeric string, e.g., p9uOHM8ABHgwBYGT0dRpZmfyUWn1)';
 COMMENT ON COLUMN crm.crm_integrations.encrypted_credentials IS 'Encrypted JSON credentials using pgcrypto';
 COMMENT ON COLUMN crm.crm_integrations.settings IS 'Non-sensitive CRM configuration (field mapping, sync settings, etc.)';
 
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS crm.crm_sync_logs (
   integration_id UUID NOT NULL REFERENCES crm.crm_integrations(integration_id) ON DELETE CASCADE,
 
   -- Denormalized user_id for fast queries (no FK)
-  user_id UUID NOT NULL,
+  user_id TEXT NOT NULL,
 
   -- CRM details
   crm_type TEXT NOT NULL,
@@ -257,32 +257,32 @@ COMMENT ON VIEW crm.sync_performance IS 'CRM sync performance metrics (last 7 da
 DO $$
 BEGIN
     RAISE NOTICE '';
-    RAISE NOTICE '╔════════════════════════════════════════════════════════════════╗';
-    RAISE NOTICE '║  ✅ CRM Microservice Schema Setup Complete                    ║';
-    RAISE NOTICE '╚════════════════════════════════════════════════════════════════╝';
+    RAISE NOTICE '════════════════════════════════════════════════════════════════';
+    RAISE NOTICE 'CRM Microservice Schema Setup Complete';
+    RAISE NOTICE '════════════════════════════════════════════════════════════════';
     RAISE NOTICE '';
-    RAISE NOTICE '📊 Database Objects Created:';
-    RAISE NOTICE '   ├── Schema: crm';
-    RAISE NOTICE '   ├── Tables (2):';
-    RAISE NOTICE '   │   ├── crm.crm_integrations';
-    RAISE NOTICE '   │   └── crm.crm_sync_logs';
-    RAISE NOTICE '   ├── Functions (3):';
-    RAISE NOTICE '   │   ├── encrypt_credentials()';
-    RAISE NOTICE '   │   ├── decrypt_credentials()';
-    RAISE NOTICE '   │   └── calculate_duration()';
-    RAISE NOTICE '   ├── Triggers (3):';
-    RAISE NOTICE '   │   ├── update_crm_integrations_updated_at';
-    RAISE NOTICE '   │   ├── update_crm_sync_logs_updated_at';
-    RAISE NOTICE '   │   └── calculate_crm_sync_duration';
-    RAISE NOTICE '   └── Views (2):';
-    RAISE NOTICE '       ├── integration_summary';
-    RAISE NOTICE '       └── sync_performance';
+    RAISE NOTICE 'Database Objects Created:';
+    RAISE NOTICE '   - Schema: crm';
+    RAISE NOTICE '   - Tables (2):';
+    RAISE NOTICE '     - crm.crm_integrations';
+    RAISE NOTICE '     - crm.crm_sync_logs';
+    RAISE NOTICE '   - Functions (3):';
+    RAISE NOTICE '     - encrypt_credentials()';
+    RAISE NOTICE '     - decrypt_credentials()';
+    RAISE NOTICE '     - calculate_duration()';
+    RAISE NOTICE '   - Triggers (3):';
+    RAISE NOTICE '     - update_crm_integrations_updated_at';
+    RAISE NOTICE '     - update_crm_sync_logs_updated_at';
+    RAISE NOTICE '     - calculate_crm_sync_duration';
+    RAISE NOTICE '   - Views (2):';
+    RAISE NOTICE '     - integration_summary';
+    RAISE NOTICE '     - sync_performance';
     RAISE NOTICE '';
-    RAISE NOTICE '⚠️  Important Next Steps:';
+    RAISE NOTICE 'Important Next Steps:';
     RAISE NOTICE '   1. Set CRM_ENCRYPTION_KEY in your .env file (32 characters)';
     RAISE NOTICE '   2. Start the service: python run.py';
     RAISE NOTICE '   3. Test health: curl http://localhost:8001/healthz';
     RAISE NOTICE '';
-    RAISE NOTICE '📖 Documentation: See README.md for API usage';
+    RAISE NOTICE 'Documentation: See README.md for API usage';
     RAISE NOTICE '';
 END $$;
