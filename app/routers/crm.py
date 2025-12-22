@@ -308,6 +308,10 @@ async def connect_crm(
 
         # Step 5: Format and return response
         settings_data = result["settings"]
+        # Parse settings if it's a JSON string
+        if isinstance(settings_data, str):
+            settings_data = json.loads(settings_data)
+
         integration_data = {
             "integration_id": str(result["integration_id"]),
             "user_id": str(result["user_id"]),
@@ -393,6 +397,10 @@ async def get_crm_status(
             )
 
         settings_data = result["settings"]
+        # Parse settings if it's a JSON string
+        if isinstance(settings_data, str):
+            settings_data = json.loads(settings_data)
+
         integration_data = {
             "integration_id": str(result["integration_id"]),
             "user_id": str(result["user_id"]),
