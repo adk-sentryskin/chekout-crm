@@ -330,10 +330,26 @@ async def connect_crm(
         )
 
     except Exception as e:
-        logger.error(f"Unexpected error connecting {request.crm_type} for merchant {user_id}: {str(e)}", exc_info=True)
+        # Enhanced error logging for debugging
+        error_msg = str(e)
+        logger.error(
+            f"Unexpected error connecting {request.crm_type} for merchant {user_id}: {error_msg}",
+            exc_info=True
+        )
+
+        # Check for common error patterns
+        if "encrypt_credentials" in error_msg or "function" in error_msg.lower():
+            logger.error("Database encryption function may not exist. Run migrations to create it.")
+            detail = f"Database configuration error while connecting {request.crm_type} integration. Please contact support."
+        elif "pgcrypto" in error_msg.lower():
+            logger.error("pgcrypto extension not installed in database")
+            detail = f"Database encryption not configured for {request.crm_type} integration. Please contact support."
+        else:
+            detail = f"An unexpected error occurred while connecting {request.crm_type} integration"
+
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred while connecting {request.crm_type} integration"
+            detail=detail
         )
 
 
@@ -492,6 +508,10 @@ async def list_integrations(
         integrations = []
         for row in results:
             settings_data = row["settings"]
+            # Parse settings if it's a JSON string
+            if isinstance(settings_data, str):
+                settings_data = json.loads(settings_data)
+
             integrations.append({
                 "integration_id": str(row["integration_id"]),
                 "user_id": str(row["user_id"]),
