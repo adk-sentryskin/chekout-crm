@@ -19,6 +19,7 @@ from ..services import (
 from ..models.crm import (
     CRMValidateRequest,
     CRMConnectRequest,
+    CRMUpdateRequest,
     EventData,
     SyncEventRequest,
     SyncFrequency
@@ -138,10 +139,11 @@ async def connect_crm(
     conn: Connection = Depends(get_conn)
 ):
     """
-    Connect a CRM integration for the merchant.
+    Create a new CRM integration for the merchant.
 
     Validates credentials, encrypts and stores them securely, and configures
     integration settings. Field mapping is handled automatically by the backend.
+    Returns 409 if integration already exists - use PATCH to update instead.
 
     **Headers Required:**
     - X-User-Id: Firebase user ID
@@ -158,7 +160,7 @@ async def connect_crm(
     ```
 
     **Response:**
-    Returns the connected integration details including integration_id, settings,
+    Returns the created integration details including integration_id, settings,
     and sync status.
     """
     try:
@@ -208,6 +210,13 @@ async def connect_crm(
         """
         existing = await conn.fetchrow(check_query, user_id, request.crm_type)
 
+        if existing:
+            return error_response(
+                message=f"{request.crm_type.capitalize()} integration already exists. Use PATCH /crm/{request.crm_type} to update.",
+                error_code=ErrorCodes.INVALID_INPUT,
+                details={"integration_id": str(existing["integration_id"])}
+            ), 409
+
         # Step 3: Validate selected_fields if provided
         valid_fields = ["first_name", "last_name", "email", "phone"]
         if request.selected_fields is not None:
@@ -249,64 +258,35 @@ async def connect_crm(
 
         settings_json = json.dumps(merged_settings)
 
-        if existing:
-            # Update existing integration
-            integration_id = existing["integration_id"]
-            logger.info(f"Updating existing {request.crm_type} integration {integration_id} for merchant {user_id}")
+        # Step 5: Create new integration
+        logger.info(f"Creating new {request.crm_type} integration for merchant {user_id}")
 
-            update_query = """
-                UPDATE crm.crm_integrations
-                SET
-                    encrypted_credentials = encrypt_credentials($1::jsonb, $2),
-                    settings = $3::jsonb,
-                    is_active = TRUE,
-                    updated_at = $4,
-                    sync_status = 'connected',
-                    sync_error = NULL
-                WHERE user_id = $5 AND crm_type = $6
-                RETURNING integration_id, user_id, crm_type, settings, is_active,
-                          created_at, updated_at, last_sync_at, sync_status
-            """
-
-            result = await conn.fetchrow(
-                update_query,
-                credentials_json,
-                settings.CRM_ENCRYPTION_KEY,
-                settings_json,
-                now,
-                user_id,
-                request.crm_type
+        insert_query = """
+            INSERT INTO crm.crm_integrations (
+                user_id, crm_type, encrypted_credentials, settings,
+                is_active, created_at, updated_at, sync_status
             )
-        else:
-            # Create new integration
-            logger.info(f"Creating new {request.crm_type} integration for merchant {user_id}")
-
-            insert_query = """
-                INSERT INTO crm.crm_integrations (
-                    user_id, crm_type, encrypted_credentials, settings,
-                    is_active, created_at, updated_at, sync_status
-                )
-                VALUES (
-                    $1, $2,
-                    encrypt_credentials($3::jsonb, $4),
-                    $5::jsonb, TRUE, $6, $7, 'connected'
-                )
-                RETURNING integration_id, user_id, crm_type, settings, is_active,
-                          created_at, updated_at, last_sync_at, sync_status
-            """
-
-            result = await conn.fetchrow(
-                insert_query,
-                user_id,
-                request.crm_type,
-                credentials_json,
-                settings.CRM_ENCRYPTION_KEY,
-                settings_json,
-                now,
-                now
+            VALUES (
+                $1, $2,
+                encrypt_credentials($3::jsonb, $4),
+                $5::jsonb, TRUE, $6, $7, 'connected'
             )
+            RETURNING integration_id, user_id, crm_type, settings, is_active,
+                      created_at, updated_at, last_sync_at, sync_status
+        """
 
-        # Step 5: Format and return response
+        result = await conn.fetchrow(
+            insert_query,
+            user_id,
+            request.crm_type,
+            credentials_json,
+            settings.CRM_ENCRYPTION_KEY,
+            settings_json,
+            now,
+            now
+        )
+
+        # Step 6: Format and return response
         settings_data = result["settings"]
         # Parse settings if it's a JSON string
         if isinstance(settings_data, str):
@@ -318,8 +298,6 @@ async def connect_crm(
             "crm_type": result["crm_type"],
             "is_active": result["is_active"],
             "settings": settings_data,
-            "selected_fields": settings_data.get("selected_fields"),
-            "lead_quality": settings_data.get("lead_quality"),
             "created_at": result["created_at"].isoformat(),
             "updated_at": result["updated_at"].isoformat(),
             "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
@@ -354,6 +332,183 @@ async def connect_crm(
         raise HTTPException(
             status_code=500,
             detail=detail
+        )
+
+
+@router.patch("/{crm_type}")
+async def update_crm(
+    crm_type: str,
+    request: CRMUpdateRequest,
+    user_id: str = Depends(get_user_id),
+    conn: Connection = Depends(get_conn)
+):
+    """
+    Update an existing CRM integration for the merchant.
+
+    Allows updating credentials, settings, selected_fields, and lead_quality.
+    All fields are optional - only provided fields will be updated.
+
+    **Headers Required:**
+    - X-User-Id: Firebase user ID
+
+    **Request Body:**
+    ```json
+    {
+      "credentials": {"api_key": "pk_new_key"},
+      "selected_fields": ["first_name", "email"],
+      "lead_quality": "Warm",
+      "settings": {
+        "enabled_events": ["order_created"]
+      }
+    }
+    ```
+
+    **Response:**
+    Returns the updated integration details.
+    """
+    try:
+        logger.info(f"Updating {crm_type} integration for merchant {user_id}")
+
+        # Validate CRM type
+        try:
+            crm_type_enum = CRMType(crm_type.lower())
+        except ValueError:
+            return error_response(
+                message=f"Unsupported CRM type: {crm_type}",
+                error_code=ErrorCodes.CRM_INVALID_TYPE
+            ), 400
+
+        # Step 1: Check if integration exists
+        check_query = """
+            SELECT integration_id, settings, encrypted_credentials
+            FROM crm.crm_integrations
+            WHERE user_id = $1 AND crm_type = $2
+        """
+        existing = await conn.fetchrow(check_query, user_id, crm_type.lower())
+
+        if not existing:
+            return error_response(
+                message=f"No {crm_type} integration found. Use POST /crm/connect to create one.",
+                error_code=ErrorCodes.CRM_INTEGRATION_NOT_FOUND
+            ), 404
+
+        # Step 2: Validate credentials if provided
+        if request.credentials:
+            try:
+                is_valid = await crm_manager.validate_credentials(
+                    crm_type_enum,
+                    request.credentials
+                )
+                if not is_valid:
+                    return error_response(
+                        message="Invalid CRM credentials",
+                        error_code=ErrorCodes.CRM_INVALID_CREDENTIALS
+                    ), 400
+            except CRMAuthError as e:
+                return error_response(
+                    message=str(e),
+                    error_code=ErrorCodes.CRM_INVALID_CREDENTIALS,
+                    details={"field": "credentials"}
+                ), 401
+            except CRMAPIError as e:
+                return error_response(
+                    message=f"Failed to validate {crm_type} credentials. Please try again later.",
+                    error_code=ErrorCodes.CRM_CONNECTION_FAILED,
+                    details={"error": str(e)}
+                ), 503
+
+        # Step 3: Validate selected_fields if provided
+        if request.selected_fields is not None:
+            valid_fields = ["first_name", "last_name", "email", "phone"]
+            invalid_fields = [f for f in request.selected_fields if f not in valid_fields]
+            if invalid_fields:
+                return error_response(
+                    message=f"Invalid fields in selected_fields: {', '.join(invalid_fields)}",
+                    error_code=ErrorCodes.INVALID_INPUT,
+                    details={
+                        "field": "selected_fields",
+                        "invalid_fields": invalid_fields,
+                        "valid_fields": valid_fields
+                    }
+                ), 400
+
+        # Step 4: Prepare updated settings
+        current_settings = existing["settings"]
+        if isinstance(current_settings, str):
+            current_settings = json.loads(current_settings)
+
+        # Merge settings
+        if request.settings is not None:
+            updated_settings = {**current_settings, **request.settings}
+        else:
+            updated_settings = current_settings.copy()
+
+        # Update selected_fields and lead_quality in settings
+        if request.selected_fields is not None:
+            updated_settings["selected_fields"] = request.selected_fields
+        if request.lead_quality is not None:
+            updated_settings["lead_quality"] = request.lead_quality
+
+        # Ensure sync_frequency remains real-time
+        updated_settings["sync_frequency"] = SyncFrequency.REAL_TIME.value
+
+        settings_json = json.dumps(updated_settings)
+
+        # Step 5: Build update query dynamically based on provided fields
+        now = datetime.now(timezone.utc)
+        update_parts = ["updated_at = $1", "settings = $2::jsonb"]
+        params = [now, settings_json]
+        param_index = 3
+
+        if request.credentials:
+            credentials_json = json.dumps(request.credentials)
+            update_parts.append(f"encrypted_credentials = encrypt_credentials(${param_index}::jsonb, ${param_index + 1})")
+            params.extend([credentials_json, settings.CRM_ENCRYPTION_KEY])
+            param_index += 2
+
+        update_query = f"""
+            UPDATE crm.crm_integrations
+            SET {', '.join(update_parts)}
+            WHERE user_id = ${param_index} AND crm_type = ${param_index + 1}
+            RETURNING integration_id, user_id, crm_type, settings, is_active,
+                      created_at, updated_at, last_sync_at, sync_status
+        """
+        params.extend([user_id, crm_type.lower()])
+
+        result = await conn.fetchrow(update_query, *params)
+
+        # Step 6: Format and return response
+        settings_data = result["settings"]
+        if isinstance(settings_data, str):
+            settings_data = json.loads(settings_data)
+
+        integration_data = {
+            "integration_id": str(result["integration_id"]),
+            "user_id": str(result["user_id"]),
+            "crm_type": result["crm_type"],
+            "is_active": result["is_active"],
+            "settings": settings_data,
+            "created_at": result["created_at"].isoformat(),
+            "updated_at": result["updated_at"].isoformat(),
+            "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
+            "sync_status": result["sync_status"]
+        }
+
+        logger.info(f"{crm_type} integration updated successfully for merchant {user_id}")
+
+        return success_response(
+            message=f"{crm_type.capitalize()} integration updated successfully",
+            data={"integration": integration_data}
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Unexpected error updating {crm_type} for merchant {user_id}: {str(e)}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred while updating {crm_type} integration"
         )
 
 
@@ -407,8 +562,6 @@ async def get_crm_status(
             "crm_type": result["crm_type"],
             "is_active": result["is_active"],
             "settings": settings_data,
-            "selected_fields": settings_data.get("selected_fields"),
-            "lead_quality": settings_data.get("lead_quality"),
             "created_at": result["created_at"].isoformat(),
             "updated_at": result["updated_at"].isoformat(),
             "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
@@ -526,8 +679,6 @@ async def list_integrations(
                 "crm_type": row["crm_type"],
                 "is_active": row["is_active"],
                 "settings": settings_data,
-                "selected_fields": settings_data.get("selected_fields"),
-                "lead_quality": settings_data.get("lead_quality"),
                 "created_at": row["created_at"].isoformat(),
                 "updated_at": row["updated_at"].isoformat(),
                 "last_sync_at": row["last_sync_at"].isoformat() if row["last_sync_at"] else None,

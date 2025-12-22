@@ -52,6 +52,26 @@ class CRMConnectRequest(BaseModel):
     )
 
 
+class CRMUpdateRequest(BaseModel):
+    """Request model for updating a CRM integration"""
+    credentials: Optional[Dict[str, Any]] = Field(
+        None,
+        description="CRM-specific credentials (if updating credentials)"
+    )
+    selected_fields: Optional[List[str]] = Field(
+        None,
+        description="List of fields to sync (e.g., ['first_name', 'last_name', 'email', 'phone'])"
+    )
+    lead_quality: Optional[str] = Field(
+        None,
+        description="Lead quality category"
+    )
+    settings: Optional[Dict[str, Any]] = Field(
+        None,
+        description="CRM settings (enabled_events, etc.). Note: sync_frequency is always 'real-time'"
+    )
+
+
 class CRMIntegrationResponse(BaseModel):
     """Response model for CRM integration"""
     integration_id: UUID4
