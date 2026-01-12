@@ -70,6 +70,10 @@ class CRMUpdateRequest(BaseModel):
         None,
         description="CRM settings (enabled_events, etc.). Note: sync_frequency is always 'real-time'"
     )
+    reconnect: Optional[bool] = Field(
+        False, 
+        description="Whether to reactivate the integration if it is currently inactive (reconnection logic)"
+    )
 
 
 class CRMIntegrationResponse(BaseModel):

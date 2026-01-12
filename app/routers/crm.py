@@ -219,19 +219,16 @@ async def connect_crm(
         existing = await conn.fetchrow(check_query, user_id, request.crm_type)
 
         if existing:
-            # If integration exists and is inactive, reactivate it
-            if not existing["is_active"]:
-                logger.info(f"Reactivating disconnected {request.crm_type} integration for merchant {user_id}")
-                return await _reactivate_integration(
-                    conn, user_id, request, existing["integration_id"]
-                )
-            else:
-                # Integration exists and is active
-                return error_response(
-                    message=f"{request.crm_type.capitalize()} integration already exists and is active. Use PATCH /crm/{request.crm_type} to update.",
-                    error_code=ErrorCodes.INVALID_INPUT,
-                    details={"integration_id": str(existing["integration_id"])}
-                ), 409
+            # If integration exists (active or inactive), tell user to use PATCH
+            status_str = "active" if existing["is_active"] else "inactive"
+            return error_response(
+                message=f"{request.crm_type.capitalize()} integration already exists and is {status_str}. Use PATCH /crm/{request.crm_type} to update or reconnect.",
+                error_code=ErrorCodes.INVALID_INPUT,
+                details={
+                    "integration_id": str(existing["integration_id"]),
+                    "is_active": existing["is_active"]
+                }
+            ), 409
 
         # Step 3: Validate selected_fields if provided
         valid_fields = ["first_name", "last_name", "email", "phone"]
@@ -361,6 +358,11 @@ async def update_crm(
     """
     Update an existing CRM integration for the merchant.
 
+    This endpoint handles:
+    1. **Configuration Updates**: Updating settings or fields for an active integration.
+    2. **Reconnection (Optional)**: If `reconnect: true` is provided, it reactivates a 
+       previously disconnected integration.
+
     Allows updating credentials, settings, selected_fields, and lead_quality.
     All fields are optional - only provided fields will be updated.
 
@@ -375,7 +377,8 @@ async def update_crm(
       "lead_quality": "Warm",
       "settings": {
         "enabled_events": ["order_created"]
-      }
+      },
+      "reconnect": true
     }
     ```
 
@@ -472,9 +475,21 @@ async def update_crm(
 
         # Step 5: Build update query dynamically based on provided fields
         now = datetime.now(timezone.utc)
-        update_parts = ["updated_at = $1", "settings = $2::jsonb"]
+        update_parts = [
+            "updated_at = $1", 
+            "settings = $2::jsonb"
+        ]
         params = [now, settings_json]
         param_index = 3
+
+        # If reconnect is requested, reactivate the integration
+        if request.reconnect:
+            logger.info(f"Reactivating {crm_type} integration for merchant {user_id}")
+            update_parts.extend([
+                "is_active = TRUE",
+                "sync_status = 'connected'",
+                "sync_error = NULL"
+            ])
 
         if request.credentials:
             credentials_json = json.dumps(request.credentials)
@@ -1224,107 +1239,3 @@ def _get_credential_last_four(credentials: Dict[str, Any], crm_type: str) -> str
         return "****"
 
 
-async def _reactivate_integration(
-    conn: Connection,
-    user_id: str,
-    request: CRMConnectRequest,
-    integration_id: UUID
-):
-    """
-    Reactivate a disconnected CRM integration with new credentials and settings.
-
-    This function is called when a user tries to connect a CRM that was previously
-    disconnected. It updates the credentials, settings, and reactivates the integration.
-
-    Args:
-        conn: Database connection
-        user_id: Firebase user ID
-        request: CRM connection request with new credentials and settings
-        integration_id: UUID of the existing integration
-
-    Returns:
-        Success response with updated integration details
-    """
-    try:
-        now = datetime.now(timezone.utc)
-        credentials_json = json.dumps(request.credentials)
-
-        # Prepare settings
-        merged_settings = request.settings.copy() if request.settings else {}
-
-        # Remove deprecated field_mapping if provided
-        if "field_mapping" in merged_settings:
-            logger.warning(
-                f"Deprecated 'field_mapping' provided for {request.crm_type} reconnection by merchant {user_id}. "
-                "This will be ignored."
-            )
-            merged_settings.pop("field_mapping", None)
-
-        # Set sync_frequency to real-time
-        merged_settings["sync_frequency"] = SyncFrequency.REAL_TIME.value
-
-        # Store selected_fields and lead_quality in settings
-        if request.selected_fields is not None:
-            merged_settings["selected_fields"] = request.selected_fields
-        if request.lead_quality is not None:
-            merged_settings["lead_quality"] = request.lead_quality
-
-        settings_json = json.dumps(merged_settings)
-
-        # Update the integration: reactivate and update credentials/settings
-        update_query = """
-            UPDATE crm.crm_integrations
-            SET
-                encrypted_credentials = encrypt_credentials($1::jsonb, $2),
-                settings = $3::jsonb,
-                is_active = TRUE,
-                sync_status = 'connected',
-                sync_error = NULL,
-                updated_at = $4
-            WHERE integration_id = $5
-            RETURNING integration_id, user_id, crm_type, settings, is_active,
-                      created_at, updated_at, last_sync_at, sync_status
-        """
-
-        result = await conn.fetchrow(
-            update_query,
-            credentials_json,
-            settings.CRM_ENCRYPTION_KEY,
-            settings_json,
-            now,
-            integration_id
-        )
-
-        # Format response
-        settings_data = result["settings"]
-        if isinstance(settings_data, str):
-            settings_data = json.loads(settings_data)
-
-        integration_data = {
-            "integration_id": str(result["integration_id"]),
-            "user_id": str(result["user_id"]),
-            "crm_type": result["crm_type"],
-            "is_active": result["is_active"],
-            "settings": settings_data,
-            "created_at": result["created_at"].isoformat(),
-            "updated_at": result["updated_at"].isoformat(),
-            "last_sync_at": result["last_sync_at"].isoformat() if result["last_sync_at"] else None,
-            "sync_status": result["sync_status"]
-        }
-
-        logger.info(f"{request.crm_type} integration reactivated successfully for merchant {user_id}")
-
-        return success_response(
-            message=f"{request.crm_type.capitalize()} integration reconnected successfully",
-            data={"integration": integration_data}
-        )
-
-    except Exception as e:
-        logger.error(
-            f"Error reactivating {request.crm_type} for merchant {user_id}: {str(e)}",
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to reconnect {request.crm_type} integration"
-        )
