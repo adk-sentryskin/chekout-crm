@@ -130,7 +130,7 @@ jobs:
             --max-instances=10 \
             --timeout=300 \
             --concurrency=80 \
-            --set-env-vars="ENVIRONMENT=staging,DEBUG=true,LOG_LEVEL=INFO,DB_DSN=postgresql://user_dev:iol%40j39Rs1kp%24LY%3F@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN,API_KEY=" \
+            --set-env-vars="ENVIRONMENT=staging,DEBUG=true,LOG_LEVEL=INFO,DB_DSN=postgresql://user_dev:DkrPg_9FvA2LwQm7XHc@34.45.186.110:5432/chekoutai?options=-c%20search_path=crm,CRM_ENCRYPTION_KEY=5cD3uw5V7gHYe7XKCK6tQq8831xeTRoN,API_KEY=" \
             --update-labels="managed-by=github-actions,commit-sha=${{ github.sha }}"
 
   # =============================================================================
