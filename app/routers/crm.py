@@ -22,7 +22,11 @@ from ..models.crm import (
     CRMUpdateRequest,
     EventData,
     SyncEventRequest,
-    SyncFrequency
+    SyncFrequency,
+    LeadWithTranscriptRequest,
+    LeadSyncResponse,
+    LeadSyncResult,
+    TranscriptSyncSettings
 )
 from ..schemas.standard_contact import StandardContactData, StandardEventData
 from ..services.field_mapper import field_mapping_service, FieldMappingError
@@ -1128,6 +1132,312 @@ async def sync_event(
     except Exception as e:
         logger.error(f"Error syncing event for merchant {user_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to sync event")
+
+
+# ============================================================================
+# LEAD WITH TRANSCRIPT SYNC (For Langflow SyncToCRM Component)
+# ============================================================================
+
+@router.post("/sync/lead", response_model=None)
+async def sync_lead_with_transcript(
+    request: LeadWithTranscriptRequest,
+    conn: Connection = Depends(get_conn)
+):
+    """
+    Sync a lead with conversation transcript to all configured CRMs.
+
+    This endpoint is called by the Langflow SyncToCRM component when a customer
+    provides their contact information during a chatbot conversation.
+
+    **Flow:**
+    1. Looks up user_id from merchant_id
+    2. Gets all active CRM integrations with transcript_sync enabled
+    3. For each CRM:
+       - Creates/updates contact with selected_fields
+       - Attaches conversation summary as note/activity
+       - Sets lead_quality from settings
+    4. Logs all sync operations
+
+    **Request Body:**
+    ```json
+    {
+      "session_id": "session_123456",
+      "merchant_id": "by-kind",
+      "customer_email": "john@example.com",
+      "first_name": "John",
+      "last_name": "Doe",
+      "phone": "+1234567890",
+      "conversation_summary": "Customer inquired about skincare...",
+      "messages": [
+        {"role": "user", "content": "Hi, I need help"},
+        {"role": "assistant", "content": "Hello! How can I help?"}
+      ],
+      "products_discussed": ["Product A", "Product B"],
+      "source": "chatbot"
+    }
+    ```
+
+    **No X-User-Id header required** - user_id is looked up from merchant_id.
+    """
+    try:
+        logger.info(f"Syncing lead with transcript for merchant {request.merchant_id}, session {request.session_id}")
+
+        # Step 1: Look up user_id from merchant_id
+        # The merchant_id maps to a user in the backend database
+        user_lookup_query = """
+            SELECT user_id FROM public.merchant_configs
+            WHERE merchant_id = $1
+            LIMIT 1
+        """
+
+        # Try to find user_id - if merchant_configs doesn't exist, try platform_connections
+        user_id = None
+        try:
+            user_result = await conn.fetchrow(user_lookup_query, request.merchant_id)
+            if user_result:
+                user_id = user_result["user_id"]
+        except Exception as lookup_error:
+            logger.warning(f"merchant_configs lookup failed: {lookup_error}")
+
+            # Fallback: Try platform_connections table
+            try:
+                fallback_query = """
+                    SELECT user_id FROM public.platform_connections
+                    WHERE shop_domain ILIKE $1 OR merchant_id = $2
+                    LIMIT 1
+                """
+                user_result = await conn.fetchrow(
+                    fallback_query,
+                    f"%{request.merchant_id}%",
+                    request.merchant_id
+                )
+                if user_result:
+                    user_id = user_result["user_id"]
+            except Exception as fallback_error:
+                logger.warning(f"platform_connections lookup failed: {fallback_error}")
+
+        if not user_id:
+            # If no user found, log warning but don't fail - use merchant_id as user_id
+            logger.warning(f"No user found for merchant {request.merchant_id}, using merchant_id as user_id")
+            user_id = request.merchant_id
+
+        # Step 2: Get all active CRM integrations
+        integrations_query = """
+            SELECT integration_id, crm_type,
+                   decrypt_credentials(encrypted_credentials, $1) as credentials,
+                   settings
+            FROM crm.crm_integrations
+            WHERE user_id = $2 AND is_active = TRUE
+        """
+        integrations = await conn.fetch(integrations_query, settings.CRM_ENCRYPTION_KEY, user_id)
+
+        if not integrations:
+            logger.info(f"No active CRM integrations for user {user_id}")
+            return success_response(
+                message="No active CRM integrations found",
+                data=LeadSyncResponse(
+                    session_id=request.session_id,
+                    merchant_id=request.merchant_id,
+                    total_crms=0,
+                    successful_syncs=0,
+                    failed_syncs=0,
+                    results=[],
+                    synced_at=datetime.now(timezone.utc)
+                ).dict()
+            )
+
+        # Step 3: Process each integration
+        results: List[LeadSyncResult] = []
+        successful_syncs = 0
+        failed_syncs = 0
+
+        for integration in integrations:
+            crm_type = integration["crm_type"]
+            integration_id = integration["integration_id"]
+            credentials = integration["credentials"]
+            crm_settings = integration["settings"]
+
+            # Parse JSON if needed
+            if isinstance(credentials, str):
+                credentials = json.loads(credentials)
+            if isinstance(crm_settings, str):
+                crm_settings = json.loads(crm_settings)
+
+            # Check if transcript_sync is enabled (default: enabled)
+            transcript_settings = crm_settings.get("transcript_sync", {})
+            if isinstance(transcript_settings, dict):
+                transcript_enabled = transcript_settings.get("enabled", True)
+            else:
+                transcript_enabled = True  # Default to enabled
+
+            if not transcript_enabled:
+                logger.info(f"Transcript sync disabled for {crm_type}, skipping")
+                continue
+
+            # Get selected_fields and lead_quality from settings
+            selected_fields = crm_settings.get("selected_fields", ["first_name", "last_name", "email", "phone"])
+            lead_quality = crm_settings.get("lead_quality", "New")
+
+            # Build contact data based on selected_fields
+            contact_data = {"email": request.customer_email}  # Email is always required
+
+            if "first_name" in selected_fields and request.first_name:
+                contact_data["first_name"] = request.first_name
+            if "last_name" in selected_fields and request.last_name:
+                contact_data["last_name"] = request.last_name
+            if "phone" in selected_fields and request.phone:
+                contact_data["phone"] = request.phone
+
+            # Add custom properties with conversation context
+            contact_data["custom_properties"] = {
+                "lead_source": request.source,
+                "lead_quality": lead_quality,
+                "session_id": request.session_id,
+                "merchant_id": request.merchant_id,
+            }
+
+            # Add products discussed if available
+            if request.products_discussed:
+                contact_data["custom_properties"]["products_discussed"] = ", ".join(request.products_discussed)
+
+            # Create sync log
+            log_id = await _create_sync_log(
+                conn, integration_id, user_id, crm_type,
+                "create_lead_with_transcript", "lead", request.session_id,
+                {
+                    "contact": contact_data,
+                    "has_transcript": bool(request.conversation_summary or request.messages)
+                }
+            )
+
+            try:
+                # Transform contact data for CRM
+                transformed_data = field_mapping_service.transform_contact(
+                    contact_data.copy(),
+                    crm_type
+                )
+
+                # Create/update contact in CRM
+                contact_result = await crm_manager.create_or_update_contact(
+                    CRMType(crm_type),
+                    credentials,
+                    transformed_data
+                )
+
+                crm_contact_id = contact_result.get("id") or contact_result.get("profile_id")
+
+                # Send conversation as event/activity if summary provided
+                activity_result = None
+                if request.conversation_summary or request.messages:
+                    # Build transcript text
+                    transcript_text = ""
+                    if request.conversation_summary:
+                        transcript_text = f"Summary: {request.conversation_summary}\n\n"
+
+                    # Include full messages if configured
+                    include_full = transcript_settings.get("include_full_transcript", False)
+                    if include_full and request.messages:
+                        transcript_text += "Conversation:\n"
+                        for msg in request.messages:
+                            role = msg.role.upper()
+                            transcript_text += f"[{role}]: {msg.content}\n"
+
+                    # Send as event
+                    event_data = {
+                        "event_name": "Chat Conversation",
+                        "properties": {
+                            "session_id": request.session_id,
+                            "transcript": transcript_text[:5000],  # Limit length
+                            "lead_quality": lead_quality,
+                            "products_discussed": request.products_discussed or [],
+                            "conversation_started_at": request.conversation_started_at.isoformat() if request.conversation_started_at else None,
+                            "conversation_ended_at": request.conversation_ended_at.isoformat() if request.conversation_ended_at else None,
+                        }
+                    }
+
+                    try:
+                        activity_result = await crm_manager.send_event(
+                            CRMType(crm_type),
+                            credentials,
+                            {"email": request.customer_email},
+                            event_data
+                        )
+                    except Exception as event_error:
+                        logger.warning(f"Failed to send transcript event to {crm_type}: {event_error}")
+
+                # Update sync log (success)
+                await _update_sync_log(conn, log_id, "success", 200, {
+                    "contact": contact_result,
+                    "activity": activity_result
+                })
+
+                # Update integration last_sync_at
+                await conn.execute(
+                    "UPDATE crm.crm_integrations SET last_sync_at = $1 WHERE integration_id = $2",
+                    datetime.now(timezone.utc), integration_id
+                )
+
+                results.append(LeadSyncResult(
+                    crm_type=crm_type,
+                    success=True,
+                    crm_contact_id=crm_contact_id,
+                    crm_activity_id=activity_result.get("id") if activity_result else None
+                ))
+                successful_syncs += 1
+                logger.info(f"Lead with transcript synced successfully to {crm_type}")
+
+            except (CRMAuthError, CRMAPIError) as e:
+                await _update_sync_log(conn, log_id, "failed", None, None, str(e))
+                results.append(LeadSyncResult(
+                    crm_type=crm_type,
+                    success=False,
+                    error_message=str(e)
+                ))
+                failed_syncs += 1
+                logger.error(f"Failed to sync lead to {crm_type}: {e}")
+
+            except FieldMappingError as e:
+                await _update_sync_log(conn, log_id, "failed", None, None, f"Field mapping error: {str(e)}")
+                results.append(LeadSyncResult(
+                    crm_type=crm_type,
+                    success=False,
+                    error_message=f"Field mapping error: {str(e)}"
+                ))
+                failed_syncs += 1
+                logger.error(f"Field mapping failed for {crm_type}: {e}")
+
+            except Exception as e:
+                await _update_sync_log(conn, log_id, "failed", None, None, str(e))
+                results.append(LeadSyncResult(
+                    crm_type=crm_type,
+                    success=False,
+                    error_message=str(e)
+                ))
+                failed_syncs += 1
+                logger.error(f"Unexpected error syncing to {crm_type}: {e}")
+
+        # Build response
+        response = LeadSyncResponse(
+            session_id=request.session_id,
+            merchant_id=request.merchant_id,
+            total_crms=len(results),
+            successful_syncs=successful_syncs,
+            failed_syncs=failed_syncs,
+            results=results,
+            synced_at=datetime.now(timezone.utc)
+        )
+
+        return success_response(
+            message=f"Lead sync completed: {successful_syncs} succeeded, {failed_syncs} failed",
+            data=response.dict()
+        )
+
+    except Exception as e:
+        logger.error(f"Error syncing lead for merchant {request.merchant_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync lead with transcript: {str(e)}"
+        )
 
 
 # ============================================================================

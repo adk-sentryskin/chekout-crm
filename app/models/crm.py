@@ -127,3 +127,87 @@ class SyncEventRequest(BaseModel):
     event_name: str
     properties: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
+
+
+# ============================================================================
+# TRANSCRIPT SYNC MODELS
+# ============================================================================
+
+class TranscriptSyncSettings(BaseModel):
+    """
+    Settings for chat transcript sync to CRM.
+    Stored in crm_integrations.settings['transcript_sync']
+    """
+    enabled: bool = Field(default=True, description="Enable transcript sync to this CRM")
+    send_on_conversation_end: bool = Field(default=True, description="Send transcript when conversation ends")
+    include_summary: bool = Field(default=True, description="Include AI-generated conversation summary")
+    include_full_transcript: bool = Field(default=False, description="Include full message history")
+    include_sentiment: bool = Field(default=False, description="Include sentiment analysis")
+
+
+class ConversationMessage(BaseModel):
+    """Individual message in a conversation"""
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+    timestamp: Optional[datetime] = Field(None, description="Message timestamp")
+
+
+class LeadWithTranscriptRequest(BaseModel):
+    """
+    Request model for syncing a lead with conversation transcript to CRM.
+    Called by Langflow SyncToCRM component when customer info is captured.
+    """
+    # Session & Merchant identification
+    session_id: str = Field(..., description="Unique conversation session ID")
+    merchant_id: str = Field(..., description="Merchant identifier (e.g., 'by-kind')")
+
+    # Customer contact info (the lead)
+    customer_email: Optional[str] = Field(None, description="Customer email address")
+    first_name: Optional[str] = Field(None, description="Customer first name")
+    last_name: Optional[str] = Field(None, description="Customer last name")
+    phone: Optional[str] = Field(None, description="Customer phone number")
+
+    # Conversation data
+    conversation_summary: Optional[str] = Field(
+        None,
+        description="AI-generated summary of the conversation"
+    )
+    messages: Optional[List[ConversationMessage]] = Field(
+        None,
+        description="Full conversation message history"
+    )
+
+    # Context
+    products_discussed: Optional[List[str]] = Field(
+        None,
+        description="Products mentioned or recommended in conversation"
+    )
+    conversation_started_at: Optional[datetime] = Field(None, description="When conversation started")
+    conversation_ended_at: Optional[datetime] = Field(None, description="When conversation ended")
+
+    # Additional metadata
+    source: str = Field(default="chatbot", description="Lead source identifier")
+    custom_properties: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Additional custom properties to sync"
+    )
+
+
+class LeadSyncResult(BaseModel):
+    """Result of syncing to a single CRM"""
+    crm_type: str
+    success: bool
+    crm_contact_id: Optional[str] = None
+    crm_activity_id: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class LeadSyncResponse(BaseModel):
+    """Response from lead sync operation"""
+    session_id: str
+    merchant_id: str
+    total_crms: int
+    successful_syncs: int
+    failed_syncs: int
+    results: List[LeadSyncResult]
+    synced_at: datetime
