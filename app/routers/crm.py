@@ -1186,7 +1186,7 @@ async def sync_lead_with_transcript(
         # The merchant_id maps to the 'key' column in the merchants table
         user_lookup_query = """
             SELECT user_id FROM public.merchants
-            WHERE merchants_id = $1
+            WHERE merchant_id = $1
             LIMIT 1
         """
 
