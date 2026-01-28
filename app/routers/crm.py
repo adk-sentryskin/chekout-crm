@@ -1182,39 +1182,21 @@ async def sync_lead_with_transcript(
     try:
         logger.info(f"Syncing lead with transcript for merchant {request.merchant_id}, session {request.session_id}")
 
-        # Step 1: Look up user_id from merchant_id
-        # The merchant_id maps to a user in the backend database
+        # Step 1: Look up user_id from merchant_id using merchants table
+        # The merchant_id maps to the 'key' column in the merchants table
         user_lookup_query = """
-            SELECT user_id FROM public.merchant_configs
-            WHERE merchant_id = $1
+            SELECT user_id FROM public.merchants
+            WHERE merchants_id = $1
             LIMIT 1
         """
 
-        # Try to find user_id - if merchant_configs doesn't exist, try platform_connections
         user_id = None
         try:
             user_result = await conn.fetchrow(user_lookup_query, request.merchant_id)
             if user_result:
                 user_id = user_result["user_id"]
         except Exception as lookup_error:
-            logger.warning(f"merchant_configs lookup failed: {lookup_error}")
-
-            # Fallback: Try platform_connections table
-            try:
-                fallback_query = """
-                    SELECT user_id FROM public.platform_connections
-                    WHERE shop_domain ILIKE $1 OR merchant_id = $2
-                    LIMIT 1
-                """
-                user_result = await conn.fetchrow(
-                    fallback_query,
-                    f"%{request.merchant_id}%",
-                    request.merchant_id
-                )
-                if user_result:
-                    user_id = user_result["user_id"]
-            except Exception as fallback_error:
-                logger.warning(f"platform_connections lookup failed: {fallback_error}")
+            logger.warning(f"merchants table lookup failed: {lookup_error}")
 
         if not user_id:
             # If no user found, log warning but don't fail - use merchant_id as user_id
@@ -1264,15 +1246,16 @@ async def sync_lead_with_transcript(
                 crm_settings = json.loads(crm_settings)
 
             # Check if transcript_sync is enabled (default: enabled)
+            # NOTE: Bypassed for now - always process regardless of setting
             transcript_settings = crm_settings.get("transcript_sync", {})
             if isinstance(transcript_settings, dict):
                 transcript_enabled = transcript_settings.get("enabled", True)
             else:
                 transcript_enabled = True  # Default to enabled
 
-            if not transcript_enabled:
-                logger.info(f"Transcript sync disabled for {crm_type}, skipping")
-                continue
+            # if not transcript_enabled:
+            #     logger.info(f"Transcript sync disabled for {crm_type}, skipping")
+            #     continue
 
             # Get selected_fields and lead_quality from settings
             selected_fields = crm_settings.get("selected_fields", ["first_name", "last_name", "email", "phone"])
