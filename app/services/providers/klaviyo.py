@@ -182,7 +182,7 @@ class KlaviyoService(BaseCRMService):
                         "data": {
                             "type": "metric",
                             "attributes": {
-                                "name": event_data.get("metric_name", "Custom Event")
+                                "name": event_data.get("metric_name") or event_data.get("event_name", "Custom Event")
                             }
                         }
                     },
@@ -218,6 +218,10 @@ class KlaviyoService(BaseCRMService):
                 if response.status_code >= 400:
                     error_detail = response.text
                     raise CRMAPIError(f"Event creation failed: {error_detail}")
+
+                # Klaviyo returns 202 Accepted with empty body on success
+                if response.status_code == 202 or not response.content:
+                    return {"status": "accepted", "message": "Event queued for processing"}
 
                 return response.json()
 
