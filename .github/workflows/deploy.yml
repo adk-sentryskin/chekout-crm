@@ -2,8 +2,9 @@
 # CI/CD Pipeline for CRM Microservice
 # =============================================================================
 # Triggers: Push to main/develop branches and pull requests
-# Environments: Staging (auto) + Production (manual approval)
+# Environments: Development (develop branch) + Production (main branch)
 # Deployment: Google Cloud Run (Serverless)
+# Authentication: Workload Identity Federation (keyless)
 # =============================================================================
 
 name: Deploy CRM Microservice
@@ -22,11 +23,16 @@ on:
       environment:
         description: 'Environment to deploy to'
         required: true
-        default: 'staging'
+        default: 'development'
         type: choice
         options:
-          - staging
+          - development
           - production
+
+# Required for Workload Identity Federation
+permissions:
+  contents: read
+  id-token: write
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -82,6 +88,11 @@ jobs:
     needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
+    # Required for WIF
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,16 +100,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker for GCR
-        run: gcloud auth configure-docker
+        run: gcloud auth configure-docker --quiet
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -112,33 +126,40 @@ jobs:
           cache-to: type=inline
 
   # =============================================================================
-  # Job 3: Deploy to Staging
+  # Job 3: Deploy to Development
   # =============================================================================
-  deploy-staging:
-    name: Deploy to Staging
+  deploy-development:
+    name: Deploy to Development
     runs-on: ubuntu-latest
     needs: build
     if: |
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+      (github.ref == 'refs/heads/develop' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'development')
     environment:
-      name: staging
+      name: development
       url: ${{ steps.deploy.outputs.url }}
 
+    # Required for WIF
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy to Cloud Run (Staging)
+      - name: Deploy to Cloud Run (Development)
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: ${{ env.SERVICE_NAME }}-staging
+          service: ${{ env.SERVICE_NAME }}-dev
           image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           region: ${{ env.REGION }}
           flags: |
@@ -150,12 +171,12 @@ jobs:
             --timeout=300
             --concurrency=80
             --allow-unauthenticated
-            --set-env-vars=ENVIRONMENT=staging,DEBUG=true,LOG_LEVEL=INFO
+            --set-env-vars=ENVIRONMENT=development,DEBUG=true,LOG_LEVEL=INFO
             --set-secrets=DB_DSN=DB_DSN:latest,CRM_ENCRYPTION_KEY=CRM_ENCRYPTION_KEY:latest,API_KEY=API_KEY:latest
 
       - name: Verify deployment
         run: |
-          echo "Staging URL: ${{ steps.deploy.outputs.url }}"
+          echo "Development URL: ${{ steps.deploy.outputs.url }}"
           sleep 10
           curl -f "${{ steps.deploy.outputs.url }}/health" || curl -f "${{ steps.deploy.outputs.url }}/" || echo "Health check endpoint not available"
 
@@ -165,7 +186,7 @@ jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [build, deploy-staging]
+    needs: build
     if: |
       (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
@@ -173,11 +194,18 @@ jobs:
       name: production
       url: ${{ steps.deploy.outputs.url }}
 
+    # Required for WIF
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -213,7 +241,7 @@ jobs:
   notify:
     name: Deployment Summary
     runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production]
+    needs: [deploy-development, deploy-production]
     if: always()
 
     steps:
@@ -222,6 +250,6 @@ jobs:
           echo "=========================================="
           echo "DEPLOYMENT SUMMARY - CRM MICROSERVICE"
           echo "=========================================="
-          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Development: ${{ needs.deploy-development.result }}"
           echo "Production: ${{ needs.deploy-production.result }}"
           echo "=========================================="
