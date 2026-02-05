@@ -3,7 +3,7 @@ set -e
 
 # =============================================================================
 # Cloud Run Deployment Script for CRM Microservice
-# Usage: ./deploy.sh [staging|production]
+# Usage: ./deploy.sh [development|production]
 # =============================================================================
 
 # Colors for output
@@ -13,13 +13,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Get environment from argument (default: staging)
-ENVIRONMENT="${1:-staging}"
+# Get environment from argument (default: development)
+ENVIRONMENT="${1:-development}"
 
 # Validate environment
-if [ "$ENVIRONMENT" != "staging" ] && [ "$ENVIRONMENT" != "production" ]; then
+if [ "$ENVIRONMENT" != "development" ] && [ "$ENVIRONMENT" != "production" ]; then
     echo -e "${RED}Error: Invalid environment '$ENVIRONMENT'${NC}"
-    echo "Usage: $0 [staging|production]"
+    echo "Usage: $0 [development|production]"
     exit 1
 fi
 
@@ -34,26 +34,33 @@ echo ""
 PROJECT_ID="${GCP_PROJECT_ID:-shopify-473015}"
 REGION="${GCP_REGION:-us-central1}"
 
-# Environment-specific configuration
-if [ "$ENVIRONMENT" = "staging" ]; then
-    SERVICE_NAME="crm-microservice-staging"
+# Environment-specific configuration (aligned with .github/workflows/deploy.yml)
+if [ "$ENVIRONMENT" = "development" ]; then
+    SERVICE_NAME="crm-microservice-dev"
     MEMORY="512Mi"
     CPU="1"
     MIN_INSTANCES="0"
-    MAX_INSTANCES="5"
+    MAX_INSTANCES="10"
     LOG_LEVEL="INFO"
     DEBUG="true"
+    # Secret Manager secret names for development
+    DB_DSN_SECRET="DB_DSN"
+    API_KEY_SECRET="API_KEY"
 else  # production
     SERVICE_NAME="crm-microservice"
     MEMORY="1Gi"
     CPU="2"
     MIN_INSTANCES="1"
-    MAX_INSTANCES="20"
+    MAX_INSTANCES="100"
     LOG_LEVEL="WARNING"
     DEBUG="false"
+    # Secret Manager secret names for production
+    DB_DSN_SECRET="DB_DSN_PROD"
+    API_KEY_SECRET="API_KEY_PROD"
 fi
 
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
+# Use consistent image name (same as CI/CD pipeline)
+IMAGE_NAME="gcr.io/${PROJECT_ID}/crm-microservice"
 
 # =============================================================================
 # Production Confirmation
@@ -113,20 +120,9 @@ echo "   Log Level:      $LOG_LEVEL"
 echo ""
 
 # =============================================================================
-# Build Environment Variables
+# Note: Secrets are stored in Google Secret Manager (same as CI/CD pipeline)
+# Required secrets: DB_DSN, DB_DSN_PROD, CRM_ENCRYPTION_KEY, API_KEY, API_KEY_PROD
 # =============================================================================
-
-ENV_FILE=$(mktemp)
-cat > ${ENV_FILE} << EOF
-ENVIRONMENT: ${ENVIRONMENT}
-DEBUG: "${DEBUG}"
-LOG_LEVEL: "${LOG_LEVEL}"
-DB_DSN: "${DB_DSN}"
-CRM_ENCRYPTION_KEY: "${CRM_ENCRYPTION_KEY}"
-API_KEY: "${API_KEY}"
-EOF
-
-trap "rm -f $ENV_FILE" EXIT
 
 # =============================================================================
 # Build and Deploy
@@ -138,13 +134,13 @@ gcloud config set project ${PROJECT_ID}
 
 # Enable required APIs
 echo -e "${YELLOW}Enabling required APIs...${NC}"
-gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com secretmanager.googleapis.com
 
 # Build and push Docker image
 echo -e "${YELLOW}Building and pushing Docker image...${NC}"
 gcloud builds submit --tag ${IMAGE_NAME}:latest .
 
-# Deploy to Cloud Run
+# Deploy to Cloud Run (aligned with .github/workflows/deploy.yml)
 echo -e "${YELLOW}Deploying to Cloud Run...${NC}"
 gcloud run deploy ${SERVICE_NAME} \
     --image ${IMAGE_NAME}:latest \
@@ -158,7 +154,8 @@ gcloud run deploy ${SERVICE_NAME} \
     --min-instances ${MIN_INSTANCES} \
     --max-instances ${MAX_INSTANCES} \
     --allow-unauthenticated \
-    --env-vars-file ${ENV_FILE}
+    --set-env-vars="ENVIRONMENT=${ENVIRONMENT},DEBUG=${DEBUG},LOG_LEVEL=${LOG_LEVEL}" \
+    --set-secrets="DB_DSN=${DB_DSN_SECRET}:latest,CRM_ENCRYPTION_KEY=CRM_ENCRYPTION_KEY:latest,API_KEY=${API_KEY_SECRET}:latest"
 
 # =============================================================================
 # Post-deployment
