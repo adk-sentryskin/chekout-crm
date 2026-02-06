@@ -35,4 +35,20 @@ class Settings(BaseSettings):
     # Optional: CORS (if needed for direct frontend access)
     CORS_ALLOWED_ORIGINS: str = "*"
 
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == "production"
+
+    # Validator to ensure key length
+    from pydantic import field_validator
+
+    @field_validator("CRM_ENCRYPTION_KEY")
+    @classmethod
+    def validate_encryption_key(cls, v: str) -> str:
+        if len(v) != 32:
+            raise ValueError(
+                f"CRM_ENCRYPTION_KEY must be exactly 32 characters long. Current length: {len(v)}"
+            )
+        return v
+
 settings = Settings()

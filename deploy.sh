@@ -139,7 +139,7 @@ gcloud config set project ${PROJECT_ID}
 
 # Enable required APIs
 echo -e "${YELLOW}Enabling required APIs...${NC}"
-gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com secretmanager.googleapis.com
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com secretmanager.googleapis.com sqladmin.googleapis.com
 
 # Build and push Docker image
 echo -e "${YELLOW}Building and pushing Docker image...${NC}"

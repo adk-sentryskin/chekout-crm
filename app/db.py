@@ -11,20 +11,26 @@ pool: asyncpg.pool.Pool | None = None
 def _get_connection_kwargs() -> dict:
     """Build connection kwargs, using Cloud SQL Proxy Unix socket if configured."""
     if settings.INSTANCE_CONNECTION_NAME:
-        # Parse credentials from DB_DSN and connect via Cloud SQL Proxy Unix socket
-        parsed = urlparse(settings.DB_DSN)
-        kwargs = {
-            'host': f'/cloudsql/{settings.INSTANCE_CONNECTION_NAME}',
-            'user': parsed.username,
-            'password': parsed.password,
-            'database': parsed.path.lstrip('/').split('?')[0],
-        }
-        logger.info(
-            f"Using Cloud SQL Proxy: {settings.INSTANCE_CONNECTION_NAME}"
-        )
-        return kwargs
+        # Parse credentials from DB_DSN
+        try:
+            parsed = urlparse(settings.DB_DSN)
+            # When using Cloud SQL Proxy, we connect via Unix socket
+            kwargs = {
+                'host': f'/cloudsql/{settings.INSTANCE_CONNECTION_NAME}',
+                'user': parsed.username,
+                'password': parsed.password,
+                'database': parsed.path.lstrip('/').split('?')[0],
+            }
+            logger.info(
+                f"🔌 Database config: Using Cloud SQL Proxy ({settings.INSTANCE_CONNECTION_NAME}) with user '{parsed.username}'"
+            )
+            return kwargs
+        except Exception as e:
+            logger.error(f"❌ Failed to parse DB_DSN for Cloud SQL Proxy: {str(e)}")
+            raise ValueError(f"Invalid DB_DSN for Cloud SQL Proxy connection: {str(e)}")
     else:
         # Direct connection using DSN (local development)
+        logger.info("🔌 Database config: Using direct DSN connection")
         return {'dsn': settings.DB_DSN}
 
 

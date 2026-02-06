@@ -111,6 +111,10 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Enable required APIs
+        run: |
+          gcloud services enable sqladmin.googleapis.com --project ${{ env.PROJECT_ID }}
+
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker --quiet
 
