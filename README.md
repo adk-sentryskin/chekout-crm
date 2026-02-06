@@ -36,6 +36,9 @@ Copy `.env.example` to `.env` and configure:
 # Database (required)
 DB_DSN=postgresql://user:pass@localhost:5432/db?options=-c%20search_path=crm
 
+# Cloud SQL Proxy (optional - for secure GCP connection)
+# INSTANCE_CONNECTION_NAME=project:region:instance
+
 # Environment
 ENVIRONMENT=development
 DEBUG=true
@@ -54,7 +57,64 @@ PORT=8001
 CORS_ALLOWED_ORIGINS=*
 ```
 
-### 2. Database Migration
+### 2. Cloud SQL Proxy (Secure Database Connection)
+
+All database connections go through the Cloud SQL Auth Proxy - no public IP exposure needed.
+
+**Find your instance connection name:**
+```bash
+gcloud sql instances describe <INSTANCE_NAME> --format='value(connectionName)'
+# Output: shopify-473015:us-central1:chekoutai-db
+```
+
+#### Local Development (Windows/Mac/Linux)
+
+1. **Authenticate with GCP:**
+   ```bash
+   gcloud auth application-default login
+   ```
+
+2. **Install the Cloud SQL Auth Proxy:**
+   ```bash
+   # Windows (download exe)
+   # https://cloud.google.com/sql/docs/postgres/connect-auth-proxy#install
+
+   # Mac
+   brew install cloud-sql-proxy
+
+   # Linux
+   curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.3/cloud-sql-proxy.linux.amd64
+   chmod +x cloud-sql-proxy
+   ```
+
+3. **Start the proxy (opens a secure tunnel on localhost:5432):**
+   ```bash
+   cloud-sql-proxy shopify-473015:us-central1:chekoutai-db --port 5432
+   ```
+
+4. **Set `DB_DSN` in `.env` to connect via localhost:**
+   ```bash
+   DB_DSN=postgresql://user_dev:password@127.0.0.1:5432/chekoutai
+   ```
+
+5. **Run the service** - it connects securely through the proxy tunnel:
+   ```bash
+   python run.py
+   ```
+
+#### Cloud Run (Production/Development)
+
+Cloud Run has built-in Cloud SQL Proxy support via the `--add-cloudsql-instances` flag. The app detects `INSTANCE_CONNECTION_NAME` env var and connects via Unix socket automatically.
+
+No manual proxy setup needed - it's handled by the deploy scripts.
+
+#### CI/CD Setup
+
+Add `INSTANCE_CONNECTION_NAME` as a GitHub repository variable:
+- Go to Settings > Secrets and variables > Actions > Variables
+- Add: `INSTANCE_CONNECTION_NAME` = `shopify-473015:us-central1:chekoutai-db`
+
+### 3. Database Migration
 
 Run the migrations to create/update the schema:
 

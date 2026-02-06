@@ -59,6 +59,10 @@ else  # production
     API_KEY_SECRET="API_KEY_PROD"
 fi
 
+# Cloud SQL Instance Connection Name (required for secure Cloud SQL Proxy connection)
+# Format: project:region:instance
+INSTANCE_CONNECTION_NAME="${INSTANCE_CONNECTION_NAME:-${PROJECT_ID}:${REGION}:chekoutai-db}"
+
 # Use consistent image name (same as CI/CD pipeline)
 IMAGE_NAME="gcr.io/${PROJECT_ID}/crm-microservice"
 
@@ -116,6 +120,7 @@ echo "   Project:        $PROJECT_ID"
 echo "   Region:         $REGION"
 echo "   Resources:      ${MEMORY} RAM, ${CPU} CPU"
 echo "   Scaling:        ${MIN_INSTANCES}-${MAX_INSTANCES} instances"
+echo "   Cloud SQL:      ${INSTANCE_CONNECTION_NAME}"
 echo "   Log Level:      $LOG_LEVEL"
 echo ""
 
@@ -154,7 +159,8 @@ gcloud run deploy ${SERVICE_NAME} \
     --min-instances ${MIN_INSTANCES} \
     --max-instances ${MAX_INSTANCES} \
     --allow-unauthenticated \
-    --set-env-vars="ENVIRONMENT=${ENVIRONMENT},DEBUG=${DEBUG},LOG_LEVEL=${LOG_LEVEL}" \
+    --add-cloudsql-instances=${INSTANCE_CONNECTION_NAME} \
+    --set-env-vars="ENVIRONMENT=${ENVIRONMENT},DEBUG=${DEBUG},LOG_LEVEL=${LOG_LEVEL},INSTANCE_CONNECTION_NAME=${INSTANCE_CONNECTION_NAME}" \
     --set-secrets="DB_DSN=${DB_DSN_SECRET}:latest,CRM_ENCRYPTION_KEY=CRM_ENCRYPTION_KEY:latest,API_KEY=${API_KEY_SECRET}:latest"
 
 # =============================================================================

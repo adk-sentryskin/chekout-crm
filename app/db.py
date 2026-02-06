@@ -1,10 +1,32 @@
 import asyncpg
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 from .config import settings
 
 logger = logging.getLogger(__name__)
 pool: asyncpg.pool.Pool | None = None
+
+
+def _get_connection_kwargs() -> dict:
+    """Build connection kwargs, using Cloud SQL Proxy Unix socket if configured."""
+    if settings.INSTANCE_CONNECTION_NAME:
+        # Parse credentials from DB_DSN and connect via Cloud SQL Proxy Unix socket
+        parsed = urlparse(settings.DB_DSN)
+        kwargs = {
+            'host': f'/cloudsql/{settings.INSTANCE_CONNECTION_NAME}',
+            'user': parsed.username,
+            'password': parsed.password,
+            'database': parsed.path.lstrip('/').split('?')[0],
+        }
+        logger.info(
+            f"Using Cloud SQL Proxy: {settings.INSTANCE_CONNECTION_NAME}"
+        )
+        return kwargs
+    else:
+        # Direct connection using DSN (local development)
+        return {'dsn': settings.DB_DSN}
+
 
 async def run_migrations():
     """Run database migrations from models.sql file"""
@@ -22,7 +44,7 @@ async def run_migrations():
         logger.info("Running database migrations...")
 
         # Create a temporary connection to run migrations
-        conn = await asyncpg.connect(dsn=settings.DB_DSN)
+        conn = await asyncpg.connect(**_get_connection_kwargs())
 
         try:
             # Execute the migration SQL
@@ -44,7 +66,7 @@ async def init_db():
 
     # Set search_path to crm schema by default
     pool = await asyncpg.create_pool(
-        dsn=settings.DB_DSN,
+        **_get_connection_kwargs(),
         min_size=1,
         max_size=10,
         server_settings={'search_path': 'crm,public'}

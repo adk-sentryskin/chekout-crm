@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # Database
     DB_DSN: str
 
+    # Cloud SQL Proxy (optional - set to enable secure connection via Cloud SQL Auth Proxy)
+    # Format: project:region:instance (e.g., shopify-473015:us-central1:chekoutai-db)
+    INSTANCE_CONNECTION_NAME: str | None = None
+
     # Environment and security settings
     ENVIRONMENT: str  # Required: development, staging, or production
     DEBUG: bool = False

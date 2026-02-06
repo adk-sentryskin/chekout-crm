@@ -171,7 +171,8 @@ jobs:
             --timeout=300
             --concurrency=80
             --allow-unauthenticated
-            --set-env-vars=ENVIRONMENT=development,DEBUG=true,LOG_LEVEL=INFO
+            --add-cloudsql-instances=${{ vars.INSTANCE_CONNECTION_NAME }}
+            --set-env-vars=ENVIRONMENT=development,DEBUG=true,LOG_LEVEL=INFO,INSTANCE_CONNECTION_NAME=${{ vars.INSTANCE_CONNECTION_NAME }}
             --set-secrets=DB_DSN=DB_DSN:latest,CRM_ENCRYPTION_KEY=CRM_ENCRYPTION_KEY:latest,API_KEY=API_KEY:latest
 
       - name: Verify deployment
@@ -226,7 +227,8 @@ jobs:
             --timeout=300
             --concurrency=80
             --allow-unauthenticated
-            --set-env-vars=ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=WARNING
+            --add-cloudsql-instances=${{ vars.INSTANCE_CONNECTION_NAME }}
+            --set-env-vars=ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=WARNING,INSTANCE_CONNECTION_NAME=${{ vars.INSTANCE_CONNECTION_NAME }}
             --set-secrets=DB_DSN=DB_DSN_PROD:latest,CRM_ENCRYPTION_KEY=CRM_ENCRYPTION_KEY:latest,API_KEY=API_KEY_PROD:latest
 
       - name: Verify deployment
